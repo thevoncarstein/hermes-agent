@@ -27,13 +27,13 @@ def test_clone_retries_and_publishes_only_materialized_tree(tmp_path, materializ
     attempts = tmp_path / "attempts"
     env = dict(os.environ, HOME=tmp_path.as_posix(), HERMES_HOME=(tmp_path / "home").as_posix(),
                HERMES_INSTALL_DIR=dest.as_posix(), HERMES_REPO_URL=origin.as_posix())
-    # Inject throttling at the network boundary; the fallback and checkout use real Git.
+    # Inject throttling at the network boundary (the first clone dies); the retry and checkout use real Git.
     script = f'''source {shlex.quote((ROOT / 'scripts/install.sh').as_posix())} --manifest
 sleep() {{ :; }}
 git() {{
     if [ "$1" = clone ]; then
         printf '%s\\n' "$*" >> {shlex.quote(attempts.as_posix())}
-        case " $* " in *" --filter=blob:none --no-checkout "*) ;; *) return 1 ;; esac
+        [ "$(wc -l < {shlex.quote(attempts.as_posix())})" -gt 1 ] || return 1
     fi
     if [ "{int(materialize_fails)}" = 1 ] && [ "${{3:-}}" = reset ]; then return 1; fi
     command git "$@"
@@ -116,6 +116,47 @@ def test_existing_treeless_checkout_is_refetched_before_update(tmp_path, install
     assert git(install, "config", "--get", "remote.origin.partialclonefilter").stdout.strip() == "blob:none"
     assert git(install, "rev-parse", "HEAD").stdout.strip() == head, "the checkout was re-cloned, not converted"
     git(install, "rev-list", "HEAD", "--", "history.txt", GIT_NO_LAZY_FETCH="1")  # history answers offline
+
+
+@pytest.mark.live_system_guard_bypass
+@pytest.mark.platforms("posix")  # the request cap below is a POSIX sh hook
+@pytest.mark.parametrize("installer", [
+    "sh",
+    pytest.param("ps1", marks=pytest.mark.skipif(POWERSHELL is None, reason="needs PowerShell")),
+])
+def test_fresh_clone_checks_out_a_tree_larger_than_one_request(tmp_path, installer):
+    """GitHub refuses a fetch of ~20,000 objects or more ("expected 'packfile'"), and a blobless
+    checkout asks for its whole tree in one fetch: every fresh install failed once the tree
+    outgrew that. The origin here enforces the same cap on a tree that exceeds it."""
+    origin = tmp_path / "origin.git"
+    install = tmp_path / "install"
+    files, cap = 21_000, 19_999
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    stream = [f"blob\nmark :{i + 1}\ndata {len(str(i)) + 1}\n{i}\n" for i in range(files)]
+    stream.append("commit refs/heads/main\ncommitter Fixture <fixture@example.invalid> 0 +0000\ndata 5\nmany\n")
+    stream += [f"M 100644 :{i + 1} d{i // 1000}/f{i}\n" for i in range(files)]
+    subprocess.run(["git", "-C", str(origin), "fast-import", "--quiet"], input="".join(stream),
+                   check=True, text=True, encoding="utf-8")
+    for key in ("uploadpack.allowFilter", "uploadpack.allowAnySHA1InWant"):
+        subprocess.run(["git", "-C", str(origin), "config", key, "true"], check=True)
+    # Git honours packObjectsHook only from global config: the run's HOME is tmp_path.
+    hook = tmp_path / "request-cap.sh"
+    hook.write_text(f'''#!/bin/sh
+in="$(mktemp)"; cat > "$in"
+wants="$(sed '/^--not$/q' "$in" | grep -cE '^[0-9a-f]{{40}}$')"
+if [ "$wants" -gt {cap} ]; then echo "refusing $wants objects in one request" >&2; rm -f "$in"; exit 1; fi
+"$@" < "$in"; rc=$?; rm -f "$in"; exit $rc
+''', encoding="utf-8")
+    hook.chmod(0o755)
+    (tmp_path / ".gitconfig").write_text(f"[uploadpack]\n\tpackObjectsHook = {hook.as_posix()}\n", encoding="utf-8")
+
+    result = _run_repository_stage(installer, tmp_path, install, origin.as_uri())
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "refusing" not in output, output
+    assert sum(1 for _ in install.glob("d*/f*")) == files
+    assert not subprocess.run(["git", "-C", str(install), "status", "--porcelain"], check=True,
+                              capture_output=True, text=True, encoding="utf-8").stdout
 
 
 @pytest.mark.live_system_guard_bypass
