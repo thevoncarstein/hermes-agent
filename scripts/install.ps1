@@ -949,6 +949,27 @@ function Receive-StableRelease([string]$Dir, [string]$Release) {
     return (-not $LASTEXITCODE)
 }
 
+# A blobless checkout asks for every file it lacks in ONE request, and GitHub refuses a
+# request for ~20,000 objects or more (HTTP 400, "expected 'packfile'"): more files than
+# this repository's tree holds. So fetch the missing blobs of commit $Rev in batches first,
+# with the arguments git's own lazy fetch uses, and the checkout finds them local.
+# rev-list --missing=print names them without fetching any. Best effort: the checkout
+# after it is the verdict (and fetches whatever is still missing). Mirrors install.sh.
+function Receive-MissingBlobs([string]$Dir, [string]$Rev) {
+    $batchSize = 5000
+    $listing = @(Invoke-Native { git -C $Dir rev-list --objects --no-walk --missing=print "$Rev^{commit}" })
+    if ($LASTEXITCODE) { return }
+    $missing = @($listing | ForEach-Object { "$_" } | Where-Object { $_.StartsWith('?') } | ForEach-Object { $_.Substring(1) })
+    for ($i = 0; $i -lt $missing.Count; $i += $batchSize) {
+        $batch = $missing[$i..([Math]::Min($i + $batchSize, $missing.Count) - 1)]
+        Invoke-Native {
+            $batch | git -C $Dir -c gc.auto=0 -c maintenance.auto=false -c fetch.negotiationAlgorithm=noop `
+                fetch --no-tags --no-write-fetch-head --recurse-submodules=no --filter=blob:none --stdin origin
+        }
+        if ($LASTEXITCODE) { return }
+    }
+}
+
 # Stable applies but cannot be reached. A fresh install stops (installing main instead would be a
 # channel nobody chose); a rerun keeps its checkout for `hermes update`, unless stable was asked
 # for by name. $What says what failed.
@@ -1162,68 +1183,59 @@ function Stage-Repository {
         # prints none to a pipe unless asked.
         $progress = @()
         if (Test-QuietOutput) { $progress = @('--progress') }
-        # A pinned install materializes only the pin (below): checking out the
-        # branch tip first fetches and rewrites every file the two differ in.
         $release = Get-StableTarget $RepoUrl
         if ($release -ceq '-') { Confirm-StableUnreachable "could not look up the latest stable release" }
         if ($release) { Log "Installing the latest stable release ($release); -Channel main follows every commit" }
-        $checkout = @()
-        if ($Commit -or $release) { $checkout = @('--no-checkout') }
         # Staging dir + deepest tracked path (~160) pass MAX_PATH (260) once LOCALAPPDATA
         # is longer than ~55 characters (a ~33-character user name), and checkout dies with
         # "Filename too long". --config lands before checkout and stays for `hermes update`.
         $longPaths = @('--config', 'core.longpaths=true')
         try {
             $cloned = $false
-            $deferred = $false
             foreach ($attempt in 1..3) {
                 # Blobless: every commit, tree and release tag (runtime identity is
                 # the nearest reachable release; -Commit pins and branch switches
                 # still resolve), file contents fetched on demand. Not treeless:
                 # a long-lived treeless checkout re-downloads whole trees on every
-                # checkout and history walk (#129712).
+                # checkout and history walk (#129712). The graph only: a cloning checkout
+                # fetches the whole tree in one request, which GitHub refuses
+                # (Receive-MissingBlobs), and a pinned install materializes only the pin, below.
                 $cloneLabel = "Cloning $RepoUrl ($Branch) into $InstallDir"
                 if ($attempt -gt 1) { $cloneLabel += " (attempt $attempt of 3)" }
-                Invoke-Logged $cloneLabel { git clone @progress @longPaths --filter=blob:none @checkout --branch $Branch $RepoUrl $tree }
+                Invoke-Logged $cloneLabel { git clone @progress @longPaths --filter=blob:none --no-checkout --branch $Branch $RepoUrl $tree }
                 if (-not $LASTEXITCODE) { $cloned = $true; break }
                 Remove-Item -LiteralPath $tree -Recurse -Force -ErrorAction SilentlyContinue
                 if ($attempt -lt 3) { Start-Sleep -Seconds ($attempt * 5) }
             }
-            if (-not $cloned) {
-                # The checkout step is where throttled downloads die: clone the
-                # graph alone, then retry materializing the tree separately.
-                Write-Warn "direct clone failed; trying deferred checkout"
-                Invoke-Logged "Cloning history" { git clone @progress @longPaths --filter=blob:none --no-checkout --branch $Branch $RepoUrl $tree }
-                if (-not $LASTEXITCODE) { $cloned = $true; $deferred = $true }
-            }
             if (-not $cloned) { Fail "git clone failed; no checkout published$(Get-NativeDetail)" git_clone_failed }
             if ($Commit) {
-                # Pin before publishing: a pinned or deferred clone has no files yet,
-                # and a failure here leaves only the staging dir, which finally removes.
+                # Pin before publishing: the clone has no files yet, and a failure
+                # here leaves only the staging dir, which finally removes.
                 Invoke-Native { git -C $tree merge-base --is-ancestor $Commit "origin/$Branch" 2>$null }
                 if ($LASTEXITCODE) { Fail "commit $Commit is not on branch $Branch" commit_not_on_branch }
             }
             # A failure here leaves only the staging dir, which finally removes.
             if ($release -and -not (Receive-StableRelease $tree $release)) { Confirm-StableUnreachable "could not fetch $release" }
-            if ($Commit -or $release -or $deferred) {
-                # The checkout step is where throttled downloads die: retry it alone.
-                # A pin detaches HEAD and leaves the branch at its tip, as the published pin did.
-                $detachAt = if ($Commit) { $Commit } else { $release }
-                $what = if ($detachAt) { $detachAt } else { "files" }
-                $materialized = $false
-                foreach ($attempt in 1..2) {
-                    Invoke-Logged "Checking out $what (attempt $attempt of 2)" {
-                        if ($detachAt) { git -C $tree checkout --force --detach $detachAt } else { git -C $tree reset --hard HEAD }
-                    }
-                    if (-not $LASTEXITCODE) { $materialized = $true; break }
-                    if ($attempt -lt 2) { Start-Sleep -Seconds 5 }
+            # The checkout step is where throttled downloads die: retry it alone.
+            # A pin detaches HEAD and leaves the branch at its tip, as the published pin did.
+            $detachAt = if ($Commit) { $Commit } else { $release }
+            $what = if ($detachAt) { $detachAt } else { "files" }
+            $target = if ($detachAt) { $detachAt } else { 'HEAD' }
+            $files = if ($detachAt) { $detachAt } else { $Branch }
+            $materialized = $false
+            foreach ($attempt in 1..2) {
+                Invoke-Logged -MayFail "Downloading the files of $files (attempt $attempt of 2)" { Receive-MissingBlobs $tree $target }
+                Invoke-Logged "Checking out $what (attempt $attempt of 2)" {
+                    if ($detachAt) { git -C $tree checkout --force --detach $detachAt } else { git -C $tree reset --hard HEAD }
                 }
-                if (-not $materialized) {
-                    $what = if ($Commit) { $Commit } else { "the cloned tree" }
-                    Fail "could not check out $what; no checkout published$(Get-NativeDetail)" git_checkout_failed
-                }
-                $pinned = [bool]$Commit
+                if (-not $LASTEXITCODE) { $materialized = $true; break }
+                if ($attempt -lt 2) { Start-Sleep -Seconds 5 }
             }
+            if (-not $materialized) {
+                $what = if ($Commit) { $Commit } else { "the cloned tree" }
+                Fail "could not check out $what; no checkout published$(Get-NativeDetail)" git_checkout_failed
+            }
+            $pinned = [bool]$Commit
             Move-Item -LiteralPath $tree -Destination $InstallDir
             Disable-TreelessGraphWrites $InstallDir
             Write-Ok "Hermes Agent cloned"

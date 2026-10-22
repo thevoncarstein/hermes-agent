@@ -696,6 +696,27 @@ fetch_release() {
     run_logged --may-fail "Fetching $release" git -C "$1" fetch origin "+refs/tags/$release:refs/tags/$release"
 }
 
+# A blobless checkout asks for every file it lacks in ONE request, and GitHub refuses a
+# request for ~20,000 objects or more (HTTP 400, "expected 'packfile'"): more files than
+# this repository's tree holds. So fetch the missing blobs of commit $2 in batches first,
+# with the arguments git's own lazy fetch uses, and the checkout finds them local.
+# rev-list --missing=print names them without fetching any. Best effort: the checkout
+# after it is the verdict (and fetches whatever is still missing).
+PREFETCH_BATCH=5000
+prefetch_blobs() {
+    local repo="$1" missing batch
+    missing="$(git -C "$repo" rev-list --objects --no-walk --missing=print "$2^{commit}")" || return 1
+    missing="$(printf '%s\n' "$missing" | sed -n 's/^?//p')"
+    while [ -n "$missing" ]; do
+        # sed reads all its input: head would exit early and break printf's pipe.
+        batch="$(printf '%s\n' "$missing" | sed -n "1,${PREFETCH_BATCH}p")"
+        missing="$(printf '%s\n' "$missing" | sed "1,${PREFETCH_BATCH}d")"
+        printf '%s\n' "$batch" | git -C "$repo" -c gc.auto=0 -c maintenance.auto=false \
+            -c fetch.negotiationAlgorithm=noop fetch --no-tags --no-write-fetch-head \
+            --recurse-submodules=no --filter=blob:none --stdin origin || return 1
+    done
+}
+
 # Stable applies but cannot be reached. A fresh install stops (installing main instead would be
 # a channel nobody chose); a rerun keeps its checkout for `hermes update`, unless stable was
 # asked for by name. $1 says what failed.
@@ -885,10 +906,9 @@ stage_repository() {
             fi
         fi
         mkdir -p "$(dirname "$INSTALL_DIR")"
-        local staged attempt label cloned=false progress=() materialize=(reset --hard HEAD) no_checkout=""
+        local staged attempt label cloned=false progress=() materialize=(reset --hard HEAD) target=HEAD
         release="$(stable_target "$REPO_URL")"
         [ "$release" != - ] || stable_unreachable "could not look up the latest stable release"
-        [ -z "$INSTALL_COMMIT$release" ] || no_checkout=--no-checkout
         [ -z "$release" ] || log "Installing the latest stable release ($release); --channel main follows every commit"
         # Phase lines ("Receiving objects: 42%") feed the status line; git
         # prints none to a pipe unless asked.
@@ -899,13 +919,13 @@ stage_repository() {
             # the nearest reachable release; --commit pins and branch switches
             # still resolve), file contents fetched on demand. Not treeless:
             # a long-lived treeless checkout re-downloads whole trees on every
-            # checkout and history walk (#129712).
+            # checkout and history walk (#129712). The graph only: a cloning checkout
+            # fetches the whole tree in one request, which GitHub refuses (prefetch_blobs),
+            # and a pinned install materializes only the pin, below.
             label="Cloning $REPO_URL ($BRANCH) into $INSTALL_DIR"
             [ "$attempt" = 1 ] || label="$label (attempt $attempt of 3)"
-            # A pinned install materializes only the pin (below): checking out the
-            # branch tip first fetches and rewrites every file the two differ in.
             if run_logged "$label" git clone ${progress[@]+"${progress[@]}"} \
-                --filter=blob:none ${no_checkout:+"$no_checkout"} --branch "$BRANCH" "$REPO_URL" "$staged/tree"; then
+                --filter=blob:none --no-checkout --branch "$BRANCH" "$REPO_URL" "$staged/tree"; then
                 cloned=true
                 break
             fi
@@ -913,46 +933,41 @@ stage_repository() {
             [ "$attempt" = 3 ] || sleep "$((attempt * 5))"
         done
         if [ "$cloned" = false ]; then
-            # The checkout step is where throttled downloads die: clone the
-            # graph alone, then retry materializing the tree separately.
-            log_warn "direct clone failed; trying deferred checkout"
-            if run_logged "Cloning history" git clone ${progress[@]+"${progress[@]}"} \
-                --filter=blob:none --no-checkout --branch "$BRANCH" "$REPO_URL" "$staged/tree"; then
-                cloned=deferred
-            fi
-        fi
-        if [ "$cloned" = false ]; then
             rm -rf "$staged"
             fail "git clone failed; no checkout published$(native_detail)" git_clone_failed
         fi
         if [ -n "$INSTALL_COMMIT" ]; then
-            # Pin before publishing: a pinned or deferred clone has no files yet,
-            # and an unpublished tree never leaves an empty checkout behind.
+            # Pin before publishing: the clone has no files yet, and an
+            # unpublished tree never leaves an empty checkout behind.
             git -C "$staged/tree" merge-base --is-ancestor "$INSTALL_COMMIT" "origin/$BRANCH" 2>/dev/null \
                 || { rm -rf "$staged"; fail "commit $INSTALL_COMMIT is not on branch $BRANCH" commit_not_on_branch; }
         fi
         if [ -n "$release" ]; then
             fetch_release "$staged/tree" || { rm -rf "$staged"; stable_unreachable "could not fetch $release"; }
             materialize=(checkout --force --detach "$release")
+            target="$release"
         fi
-        if [ -n "$INSTALL_COMMIT$release" ] || [ "$cloned" = deferred ]; then
-            # The checkout step is where throttled downloads die: retry it alone.
-            # A pin detaches HEAD and leaves the branch at its tip, as the published pin did.
-            [ -z "$INSTALL_COMMIT" ] || materialize=(checkout --force --detach "$INSTALL_COMMIT")
-            cloned=false
-            for attempt in 1 2; do
-                if run_logged "Checking out ${INSTALL_COMMIT:-${release:-files}} (attempt $attempt of 2)" \
-                    git -C "$staged/tree" "${materialize[@]}"; then
-                    cloned=true
-                    [ -z "$INSTALL_COMMIT" ] || pinned=true
-                    break
-                fi
-                [ "$attempt" = 2 ] || sleep 5
-            done
-            if [ "$cloned" = false ]; then
-                rm -rf "$staged"
-                fail "could not check out ${INSTALL_COMMIT:-the cloned tree}; no checkout published$(native_detail)" git_checkout_failed
+        # A pin detaches HEAD and leaves the branch at its tip, as the published pin did.
+        if [ -n "$INSTALL_COMMIT" ]; then
+            materialize=(checkout --force --detach "$INSTALL_COMMIT")
+            target="$INSTALL_COMMIT"
+        fi
+        # The checkout step is where throttled downloads die: retry it alone.
+        cloned=false
+        for attempt in 1 2; do
+            run_logged --may-fail "Downloading the files of ${INSTALL_COMMIT:-${release:-$BRANCH}} (attempt $attempt of 2)" \
+                prefetch_blobs "$staged/tree" "$target" || :
+            if run_logged "Checking out ${INSTALL_COMMIT:-${release:-files}} (attempt $attempt of 2)" \
+                git -C "$staged/tree" "${materialize[@]}"; then
+                cloned=true
+                [ -z "$INSTALL_COMMIT" ] || pinned=true
+                break
             fi
+            [ "$attempt" = 2 ] || sleep 5
+        done
+        if [ "$cloned" = false ]; then
+            rm -rf "$staged"
+            fail "could not check out ${INSTALL_COMMIT:-the cloned tree}; no checkout published$(native_detail)" git_checkout_failed
         fi
         if ! mv "$staged/tree" "$INSTALL_DIR"; then
             rm -rf "$staged"

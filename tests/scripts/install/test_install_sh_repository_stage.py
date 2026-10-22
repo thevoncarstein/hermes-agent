@@ -122,8 +122,10 @@ def test_pinned_fresh_clone_never_materializes_the_branch_tip(tmp_path):
     result = _stage(unpinned_root, origin, prelude=tracer)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (unpinned_root / "install" / "README").read_text() == "tip"
+    # Every fresh clone is graph-only: its files arrive in batched fetches GitHub accepts,
+    # never in the single whole-tree fetch a cloning checkout makes.
     [clone] = [line for line in trace.read_text().splitlines() if line.startswith("clone ")]
-    assert "--no-checkout" not in clone.split()
+    assert "--no-checkout" in clone.split()
 
 
 def test_pinned_fresh_clone_publishes_nothing_when_the_pin_fails(tmp_path):
