@@ -74,10 +74,10 @@ export async function canonicalGroupRequest<T>(
   }, method, { ...params, profile: route.profile })
 }
 
-export async function discoverCanonicalGroups(
-  route: CanonicalGroupRoute
-): Promise<{ driver: boolean; rooms: CanonicalRoom[] }> {
-  const capabilities = await canonicalGroupRequest<{ driver: boolean }>(route, 'groups.capabilities')
+/** Every room `route` hosts. Listing needs no `groups.capabilities` round trip,
+ *  which is the costliest read on a cold gateway (it resolves the profile's
+ *  execution policy from its full config). */
+export async function discoverCanonicalRooms(route: CanonicalGroupRoute): Promise<CanonicalRoom[]> {
   const rooms: CanonicalRoom[] = []
   let offset = 0
 
@@ -97,7 +97,7 @@ export async function discoverCanonicalGroups(
     offset = page.next_offset
   }
 
-  return { driver: capabilities.driver === true, rooms }
+  return rooms
 }
 
 export async function createCanonicalGroup(

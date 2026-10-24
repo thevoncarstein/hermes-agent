@@ -1,6 +1,6 @@
 import { atom } from '@hermes/plugin-sdk'
 
-import { discoverCanonicalGroups } from './canonical-groups'
+import { discoverCanonicalRooms } from './canonical-groups'
 import type { CanonicalGroupBinding, CanonicalGroupRoute, CanonicalRoom } from './canonical-groups'
 
 export const $canonicalGroupBindings = atom<Record<string, CanonicalGroupBinding>>({})
@@ -73,7 +73,7 @@ export async function resolveCanonicalGroup(
 ): Promise<{ authority: CanonicalGroupRoute; room: CanonicalRoom } | null> {
   const parsed = canonicalGroupKeyRoute(group, origin)
   const authority = parsed ? { connectionId: parsed.connectionId, profile: parsed.profile } : route
-  const { rooms } = await discoverCanonicalGroups(authority)
+  const rooms = await discoverCanonicalRooms(authority)
   const room = parsed ? rooms.find(r => r.room_id === parsed.roomId) : rooms.find(r => r.name === group)
 
   return room ? { authority, room } : null

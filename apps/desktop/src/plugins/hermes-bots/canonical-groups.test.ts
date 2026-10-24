@@ -8,7 +8,7 @@ const host = vi.hoisted(() => ({
 
 vi.mock('@hermes/plugin-sdk', () => ({ host }))
 
-import { actCanonicalGroup, canonicalGroupRequest, captureCanonicalGroupRoute, createCanonicalGroup, discoverCanonicalGroups } from './canonical-groups'
+import { actCanonicalGroup, canonicalGroupRequest, captureCanonicalGroupRoute, createCanonicalGroup, discoverCanonicalRooms } from './canonical-groups'
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -21,12 +21,11 @@ it('pins discovery and every subsequent request to its captured authority, inclu
   const room = { room_id: 'room-a', name: 'Team', members: [] }
   host.state.connectionId.get.mockReturnValue('source-b')
   host.state.profile.get.mockReturnValue('other')
-  host.requestProfile.mockResolvedValueOnce({ driver: false })
-    .mockResolvedValueOnce({ rooms: [], next_offset: 100 })
+  host.requestProfile.mockResolvedValueOnce({ rooms: [], next_offset: 100 })
     .mockResolvedValueOnce({ rooms: [room], next_offset: null })
-  expect(await discoverCanonicalGroups(route)).toEqual({ driver: false, rooms: [room] })
+  expect(await discoverCanonicalRooms(route)).toEqual([room])
+  // Listing never pays for groups.capabilities, the costliest read on a cold gateway.
   expect(host.requestProfile.mock.calls.map(call => [call[1], call[2]])).toEqual([
-    ['groups.capabilities', { profile: 'default' }],
     ['groups.list', { profile: 'default', limit: 100, offset: 0 }],
     ['groups.list', { profile: 'default', limit: 100, offset: 100 }]
   ])
@@ -39,8 +38,8 @@ it('pins discovery and every subsequent request to its captured authority, inclu
   await expect(canonicalGroupRequest(route, 'groups.state', { room_id: room.room_id })).rejects.toThrow('owner disconnected')
   await expect(canonicalGroupRequest({ ...route, connectionId: '' }, 'groups.list', {})).rejects.toThrow()
   await expect(canonicalGroupRequest(route, 'groups.list', { profile: 'other' })).rejects.toThrow()
-  host.requestProfile.mockResolvedValueOnce({ driver: true }).mockResolvedValueOnce({ rooms: [], next_offset: 0 })
-  await expect(discoverCanonicalGroups(route)).rejects.toThrow('pagination')
+  host.requestProfile.mockResolvedValueOnce({ rooms: [], next_offset: 0 })
+  await expect(discoverCanonicalRooms(route)).rejects.toThrow('pagination')
   expect(host.request).not.toHaveBeenCalled()
 })
 

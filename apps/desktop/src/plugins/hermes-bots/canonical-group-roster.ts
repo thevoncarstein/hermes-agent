@@ -3,19 +3,23 @@
  * with the key it opens under and its latest message, for the row preview.
  *
  * `groups.list` carries no message text, so each room's preview is one short
- * `groups.log` page read from its tail.
+ * `groups.log` page read from its tail. Rows publish as soon as the list
+ * answers; previews fill in after, so one slow tail read never holds the list.
  */
 
 import { atom, host, useValue } from '@hermes/plugin-sdk'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 import type { CanonicalGroupEvent } from './canonical-group-history'
 import { registerCanonicalGroup } from './canonical-group-registry'
-import { canonicalGroupRequest, captureCanonicalGroupRoute, discoverCanonicalGroups } from './canonical-groups'
+import { canonicalGroupRequest, captureCanonicalGroupRoute, discoverCanonicalRooms } from './canonical-groups'
 import type { CanonicalGroupRoute, CanonicalRoom } from './canonical-groups'
 
 const PREVIEW_WINDOW = 10
 const POLL_MS = 30_000
+/** A failed load (the panel opening before its backend answers) retries on
+ *  these delays before falling back to the poll. */
+const RETRY_MS = [1_000, 2_000, 4_000]
 const MESSAGE_KINDS = new Set(['message', 'message.user', 'message.member'])
 
 export interface CanonicalRoomPreview {
@@ -31,6 +35,16 @@ export interface CanonicalRosterRoom {
   last: CanonicalRoomPreview | null
   room: CanonicalRoom
   route: CanonicalGroupRoute
+}
+
+const NO_ROOMS: CanonicalRosterRoom[] = []
+
+/** The last rooms listed and the source they came from, so a reopened panel
+ *  paints them at once while it refreshes. */
+const $canonicalRosterRooms = atom<{ source: string; rooms: CanonicalRosterRoom[] }>({ source: '', rooms: NO_ROOMS })
+
+function rosterSource(route: CanonicalGroupRoute): string {
+  return JSON.stringify([route.connectionId, route.profile])
 }
 
 const $canonicalRosterRefresh = atom(0)
@@ -74,50 +88,72 @@ async function roomPreview(route: CanonicalGroupRoute, room: CanonicalRoom) {
   return canonicalRoomPreview(page.events, room)
 }
 
-export async function loadCanonicalRosterRooms(route: CanonicalGroupRoute): Promise<CanonicalRosterRoom[]> {
-  const { rooms } = await discoverCanonicalGroups(route)
+/** List `route`'s rooms into the roster now, each row keeping its previous
+ *  preview, then reread the tail of every room that moved since. `isCurrent`
+ *  turns false once a newer load or a source switch supersedes this one. */
+async function syncCanonicalRosterRooms(route: CanonicalGroupRoute, isCurrent: () => boolean): Promise<void> {
+  const source = rosterSource(route)
+  const listed = await discoverCanonicalRooms(route)
 
-  return Promise.all(
-    rooms.map(async room => ({
-      key: registerCanonicalGroup(route, room),
-      // A failed tail read costs the row its preview, never the row itself.
-      last: await roomPreview(route, room).catch(() => null),
-      room,
-      route
-    }))
+  if (!isCurrent()) {
+    return
+  }
+
+  const cached = $canonicalRosterRooms.get()
+  const previous = new Map(cached.source === source ? cached.rooms.map(row => [row.key, row]) : [])
+
+  const rows = listed.map(room => {
+    const key = registerCanonicalGroup(route, room)
+
+    return { key, last: previous.get(key)?.last ?? null, room, route }
+  })
+
+  $canonicalRosterRooms.set({ source, rooms: rows })
+
+  await Promise.all(
+    rows.map(async row => {
+      const before = previous.get(row.key)
+
+      if (before?.last && before.room.latest_seq === row.room.latest_seq) {
+        return
+      }
+
+      // A failed tail read keeps the row and whatever preview it had.
+      const last = await roomPreview(route, row.room).catch(() => row.last)
+      const current = $canonicalRosterRooms.get()
+
+      if (isCurrent() && last !== row.last && current.source === source) {
+        $canonicalRosterRooms.set({ source, rooms: current.rooms.map(r => (r.key === row.key ? { ...r, last } : r)) })
+      }
+    })
   )
 }
 
 /** The current source's hosted rooms, reloaded on a source switch and polled
- *  while the roster is mounted. A failed load keeps the rows already shown;
- *  the next poll retries. */
+ *  while the roster is mounted. A failed load keeps the rows already shown and
+ *  retries within seconds before falling back to the poll. */
 export function useCanonicalRosterRooms(): CanonicalRosterRoom[] {
   const connectionId = useValue(host.state.connectionId)
   const profile = useValue(host.state.profile)
   const refresh = useValue($canonicalRosterRefresh)
-  const [rooms, setRooms] = useState<CanonicalRosterRoom[]>([])
-
-  useEffect(() => {
-    setRooms([])
-  }, [connectionId, profile])
+  const cached = useValue($canonicalRosterRooms)
 
   useEffect(() => {
     let cancelled = false
+    let failures = 0
     let timer: ReturnType<typeof setTimeout> | undefined
 
     const load = async () => {
       try {
-        const next = await loadCanonicalRosterRooms(captureCanonicalGroupRoute())
-
-        if (!cancelled) {
-          setRooms(next)
-        }
+        await syncCanonicalRosterRooms(captureCanonicalGroupRoute(), () => !cancelled)
+        failures = 0
       } catch {
-        // No connection yet, or the gateway is unreachable: keep what is shown.
+        // No connection yet, or its backend is still settling.
+        failures += 1
       }
 
       if (!cancelled) {
-        timer = setTimeout(() => void load(), POLL_MS)
+        timer = setTimeout(() => void load(), (failures > 0 && RETRY_MS[failures - 1]) || POLL_MS)
       }
     }
 
@@ -129,5 +165,5 @@ export function useCanonicalRosterRooms(): CanonicalRosterRoom[] {
     }
   }, [connectionId, profile, refresh])
 
-  return rooms
+  return connectionId !== null && cached.source === rosterSource({ connectionId, profile }) ? cached.rooms : NO_ROOMS
 }
