@@ -15,6 +15,12 @@ vi.mock('@hermes/plugin-sdk', async () => {
     Button: (props: ComponentProps<'button'>) => <button {...props} />,
     Codicon: () => <span />, Tip: ({ children }: { children: ReactNode }) => <>{children}</> }
 })
+vi.mock('./i18n', async () => {
+  const { CANONICAL_GROUP_LOCALES } = await import('./canonical-group-locales')
+
+  return { useBots: () => ({ canonical: CANONICAL_GROUP_LOCALES.en }) }
+})
+vi.mock('./shared', () => ({ getPluginCtx: () => null }))
 vi.mock('./canonical-group-labels', async () => {
   const { CANONICAL_GROUP_LOCALES } = await import('./canonical-group-locales')
 

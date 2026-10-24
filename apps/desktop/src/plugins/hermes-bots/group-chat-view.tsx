@@ -42,6 +42,7 @@ import { avatarColor, botAppearance, BotFace } from './avatar'
 import { isBackfilledFacePng } from './avatar-image'
 import { groupCreationSource, groupExecutionMode } from './canonical-group-capabilities'
 import type { GroupExecutionMode } from './canonical-group-capabilities'
+import { localProjectScope } from './canonical-group-context'
 import type { CanonicalGroupOrigin } from './canonical-group-registry'
 import {
   $canonicalGroupBindings,
@@ -91,6 +92,7 @@ import { GroupClarifyCard, GroupImageControls, GroupMentionInput } from './group
 import type { GroupRoomPrompt } from './group-chat-parts'
 import { GroupMemberPicker } from './group-chat-view-members'
 import { compressGroupMemberHistory } from './group-compress'
+import { GroupContextMenu, groupEntryContext, useGroupContextFolders } from './group-context-folders'
 import { sweepExternalGroupWrites } from './group-external-writes'
 import { GroupHoldStatus } from './group-hold-status'
 import {
@@ -582,7 +584,8 @@ interface GroupChatWorkspaceProps {
    *  which fails closed: a name never parses as a `canonical:` key. */
   origin?: CanonicalGroupOrigin
   members: GroupMember[]
-  onBack?: () => void
+  /** Closes the surface showing the room (the main tab's closer); used once a room is deleted. */
+  onClose?: () => void
   visible?: boolean
 }
 
@@ -592,7 +595,16 @@ export function GroupChatWorkspace(props: GroupChatWorkspaceProps) {
   const profile = useValue(host.state.profile)
   const binding = canonicalGroupBindingFor(bindings, { connectionId: connectionId ?? '', profile }, props.group, props.origin ?? 'name')
 
-  if (binding) {return <CanonicalGroupWorkspace binding={binding} onBack={props.onBack} visible={props.visible} />}
+  if (binding) {
+    // The roster lists live rooms only: a reload drops the disbanded one.
+    const deleted = () => {
+      refreshCanonicalRosterRooms()
+
+      if (props.onClose) {props.onClose()} else {$groupChatWorkspace.set(null)}
+    }
+
+    return <CanonicalGroupWorkspace binding={binding} onDeleted={deleted} visible={props.visible} />
+  }
 
   return <GroupExecutionGate {...props} />
 }
@@ -700,7 +712,7 @@ function GroupExecutionGate(props: GroupChatWorkspaceProps) {
   </div>
 }
 
-function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: GroupChatWorkspaceProps) {
+function LegacyGroupChatWorkspace({ group, members, visible = true }: GroupChatWorkspaceProps) {
   const b = useBots()
   const rooms: Record<string, GroupChatRoom> = useValue($groupChats)
   const allMeta: Record<string, BotMeta> = useValue($botMeta)
@@ -711,6 +723,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   }
 
   const composerKey = groupComposerDraftKey(group, room)
+  const context = useGroupContextFolders(localProjectScope(room.roomId, group))
   const composerKeyRef = useRef(composerKey)
   const [composerDraft, setComposerDraft] = useState(() => groupComposerDraftSnapshot(composerKey))
 
@@ -1009,9 +1022,6 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
 
   const header = (
     <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-2">
-      <Button onClick={() => (onBack ? onBack() : $groupChatWorkspace.set(null))} size="sm" variant="ghost">
-        Back
-      </Button>
       {/* Room picture (set via Group settings) leads the title when present. */}
       {room.image ? (
         <img
@@ -1212,9 +1222,11 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
     // Main composer = START A NEW THREAD with the whole group (Slack shape).
     // Full descriptors ride into the turn loop: remote members keep their
     // connection fields so their turns route to their own machines.
-    const minted = sendToGroupChat(group, memberDescriptors(), text, null, images)
+    const minted = sendToGroupChat(group, memberDescriptors(), context.compose(text, null), null, images)
 
-    if (!minted) {
+    if (minted) {
+      context.clearFolders(null)
+    } else {
       const restored = restoreGroupComposerDraft(composerKeyRef.current, cleared.revision, before)
 
       if (restored) {
@@ -1247,9 +1259,11 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
 
     // Reply box = CONTINUE this thread; the member turns it triggers are
     // scoped to it.
-    const sent = sendToGroupChat(group, memberDescriptors(), text, thread, images)
+    const sent = sendToGroupChat(group, memberDescriptors(), context.compose(text, thread), thread, images)
 
-    if (!sent) {
+    if (sent) {
+      context.clearFolders(thread)
+    } else {
       const restored = restoreGroupComposerDraft(composerKeyRef.current, cleared.revision, before)
 
       if (restored) {
@@ -1301,18 +1315,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   }
 
   const attachButton = (thread: null | string) => (
-    <Tip label={b.group.attachHint}>
-      <Button
-        aria-label={b.group.attachHint}
-        className="shrink-0 text-(--ui-text-tertiary) hover:text-foreground"
-        onClick={() => void pickGroupAttachments().then(picked => addImages(thread, picked))}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <Codicon name="attach" />
-      </Button>
-    </Tip>
+    <GroupContextMenu onAddFiles={() => void pickGroupAttachments().then(picked => addImages(thread, picked))} onAddFolder={() => context.addFolders(thread)} />
   )
 
   // #91359: recognized @mentions render as inline references; recomputed
@@ -1353,6 +1356,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   // One log entry, rendered exactly as before conversation folding existed.
   const renderEntry = (entry: GroupMessage, index: number) => {
     const isUser = entry.from.kind === 'user'
+    const { text, chips: contextChips } = groupEntryContext(entry)
     const meta = groupTranscriptSpeakerMeta(entry, members, allMeta)
 
     // Match this speaker back to its member descriptor so display
@@ -1431,7 +1435,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
               </Tip>
             )}
             <span className="text-[0.625rem] text-(--ui-text-quaternary)">{relativeTime(entry.at)}</span>
-            {entry.text.trim() || !isUser ? (
+            {text.trim() || !isUser ? (
               <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
                 {isUser ? null : (
                   <Tip label={`Reply to @${replyMentionTag(entry, member)}`}>
@@ -1446,8 +1450,8 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
                     </Button>
                   </Tip>
                 )}
-                {entry.text.trim() ? (
-                  <CopyButton appearance="icon" buttonSize="icon" stopPropagation text={entry.text} />
+                {text.trim() ? (
+                  <CopyButton appearance="icon" buttonSize="icon" stopPropagation text={text} />
                 ) : null}
               </div>
             ) : null}
@@ -1459,13 +1463,14 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
             data-slot="group-chat-message-content"
           >
             {MessageTextContent ? (
-              <MessageTextContent decorateText={mentionText} media={!member?.remoteSource} text={entry.text} />
+              <MessageTextContent decorateText={mentionText} media={!member?.remoteSource} text={text} />
             ) : Streamdown ? (
-              <Streamdown components={mentionComponents}>{entry.text}</Streamdown>
+              <Streamdown components={mentionComponents}>{text}</Streamdown>
             ) : (
-              entry.text
+              text
             )}
           </div>
+          {contextChips}
           {/* User attachments: what every responding bot was */
           /* shown — image previews, or a named chip for */
           /* PDFs/files. */}
@@ -1525,6 +1530,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
           }}
         >
           {attachmentRow(id)}
+          {context.chips(id)}
           <div className="flex items-center gap-1.5">
             <GroupMentionInput
               aria-label={b.group.replyInThread}
@@ -1642,6 +1648,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
           }}
         >
           {attachmentRow(null)}
+          {context.chips(null)}
           <div className="flex items-center gap-1.5">
             <GroupMentionInput
               aria-label={b.group.messageRoom(group)}
@@ -1692,6 +1699,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
         onConfirm={async () => {
           clearGroupComposerDraft(composerKeyRef.current)
           await disbandGroupChat(group, members)
+          context.clearProject()
           host.notify({
             kind: 'success',
             message: b.group.disbanded(group)
@@ -1735,7 +1743,7 @@ function GroupChatMainView({ group, origin }: GroupChatMainViewProps) {
   const visible = useValue($visible)
 
   return (
-    <GroupChatWorkspace group={group} members={members} onBack={() => closeGroupChatMainTab(group)} origin={origin} visible={visible} />
+    <GroupChatWorkspace group={group} members={members} onClose={() => closeGroupChatMainTab(group)} origin={origin} visible={visible} />
   )
 }
 

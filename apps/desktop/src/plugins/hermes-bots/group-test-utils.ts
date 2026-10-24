@@ -21,6 +21,7 @@
  */
 
 import type { PluginContext } from '@hermes/plugin-sdk'
+import type { ReactNode } from 'react'
 import { vi } from 'vitest'
 
 /** One message in a scripted session transcript, in the gateway's own shape. */
@@ -455,10 +456,24 @@ export function createGroupGateway(options: GatewayOptions = {}): ScriptedGatewa
  *  the `vi.mock` factory rather than hoisted alongside it. */
 export async function pluginSdkMock(host: Record<string, unknown>) {
   const nanostores = await import('nanostores')
+  const { createElement, Fragment } = await import('react')
   const { Textarea } = await import('@/components/ui/textarea')
+  const Pass = ({ children }: { children?: ReactNode }) => createElement(Fragment, null, children)
 
   return {
     Textarea,
+    Codicon: () => null,
+    Tip: Pass,
+    DropdownMenu: Pass,
+    DropdownMenuContent: Pass,
+    DropdownMenuTrigger: Pass,
+    DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) =>
+      createElement('button', { onClick: onSelect, role: 'menuitem', type: 'button' }, children),
+    // Open → the title and a Confirm that runs the action and closes, like the real dialog.
+    ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onClose }: {
+      open: boolean; title: ReactNode; confirmLabel?: string; onConfirm: () => Promise<void> | void; onClose: () => void
+    }) => open ? createElement('div', { role: 'alertdialog' }, title,
+      createElement('button', { onClick: async () => { await onConfirm(); onClose() }, type: 'button' }, confirmLabel ?? 'Confirm')) : null,
     // Real value: approval.respond forwards it as its client deadline (#60654).
     APPROVAL_RESPOND_TIMEOUT_MS: 300_000,
     atom: nanostores.atom,

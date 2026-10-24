@@ -131,8 +131,7 @@ interface MentionToken {
  *  attribution, a composer that drives the round-robin, and a working
  *  indicator while member turns run. Renders identically in the MAIN chat
  *  window (host.openWorkspace tile) and in the bots panel (older-desktop
- *  fallback); `onBack` is where the Back button routes — the main tile's
- *  closer, or clearing the in-panel workspace atom. */
+ *  fallback). */
 /** The active @-token at the caret: text from the nearest '@' (that begins a
  *  word) up to the caret, or null when the caret isn't inside a mention. */
 function mentionTokenAt(text: string, caret: number): MentionToken | null {

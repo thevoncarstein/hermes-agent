@@ -3,12 +3,15 @@ import { useEffect, useRef, useState } from 'react'
 
 import { type CanonicalDriverActivity, CanonicalGroupRoster, CanonicalGroupWorkingLine, canonicalMemberPhases } from './canonical-group-activity'
 import { CanonicalGroupAttachments } from './canonical-group-attachments'
+import { hostedProjectScope } from './canonical-group-context'
+import { CanonicalGroupDelete } from './canonical-group-delete'
 import { type CanonicalGroupEvent, CanonicalGroupHistory } from './canonical-group-history'
 import { useCanonicalGroupLabels } from './canonical-group-labels'
 import { prepareCanonicalGroupSend, readCanonicalGroupSend, retireCanonicalGroupSend } from './canonical-group-send'
 import type { PreparedCanonicalGroupSend } from './canonical-group-send'
 import { actCanonicalGroup, canonicalGroupRequest } from './canonical-groups'
 import type { CanonicalGroupBinding, CanonicalPendingAction, CanonicalRoom } from './canonical-groups'
+import { useGroupContextFolders } from './group-context-folders'
 
 type RoomEvent = CanonicalGroupEvent
 interface Attachment { attachment_id?: string; event_id?: string; kind: string; name: string; mime: string; size?: number }
@@ -17,15 +20,15 @@ interface RoomState { room: CanonicalRoom; driver_status?: CanonicalDriverActivi
 const sameGroupPayload = (payload: Record<string, unknown>, text: string, attachments: Attachment[]) =>
   payload.text === text && JSON.stringify(payload.attachments ?? []) === JSON.stringify(attachments)
 
-export function CanonicalGroupWorkspace({ binding, visible = true, onBack }: {
-  binding: CanonicalGroupBinding; visible?: boolean; onBack?: () => void
+export function CanonicalGroupWorkspace({ binding, visible = true, onDeleted }: {
+  binding: CanonicalGroupBinding; visible?: boolean; onDeleted?: () => void
 }) {
   // Remount on identity changes: old polls and pending confirmations never cross rooms.
-  return <CanonicalRoomView binding={binding} key={JSON.stringify([binding.connectionId, binding.profile, binding.roomId])} onBack={onBack} visible={visible} />
+  return <CanonicalRoomView binding={binding} key={JSON.stringify([binding.connectionId, binding.profile, binding.roomId])} onDeleted={onDeleted} visible={visible} />
 }
 
-function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
-  binding: CanonicalGroupBinding; visible: boolean; onBack?: () => void
+function CanonicalRoomView({ binding: initialBinding, visible, onDeleted }: {
+  binding: CanonicalGroupBinding; visible: boolean; onDeleted?: () => void
 }) {
   const [binding] = useState(() => ({ ...initialBinding }))
   const labels = useCanonicalGroupLabels()
@@ -42,6 +45,7 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
   const busyRef = useRef(false)
   const alive = useRef(true)
   const [discard, setDiscard] = useState<CanonicalPendingAction | null>(null)
+  const context = useGroupContextFolders(hostedProjectScope(initialBinding, initialBinding.roomId))
   const revision = useRef(0)
   // This window's typed draft while it sends the room's one pending intent another window prepared.
   const heldDraft = useRef<{ text: string; attachments: Attachment[] } | null>(null)
@@ -127,13 +131,16 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
   const send = () => {
     if (!restored || busyRef.current || uploading || !state?.driver_status || (!pending && !draft.trim() && !attachments.length)) {return}
     void mutate(async () => {
-      const exact = pending ?? await prepareCanonicalGroupSend(binding, { text: draft, attachments })
+      const text = context.compose(draft, null)
+      const exact = pending ?? await prepareCanonicalGroupSend(binding, { text, attachments })
 
       if (!alive.current) {return}
 
       // Another window won the room's slot: send its intent first, keep this window's words.
-      if (!pending && !sameGroupPayload(exact.params.payload, draft, attachments)) {
+      if (!pending && !sameGroupPayload(exact.params.payload, text, attachments)) {
         heldDraft.current = { text: draft, attachments }
+      } else {
+        context.clearFolders(null)
       }
 
       setPending(exact)
@@ -160,12 +167,11 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
 
   return <section className="flex h-full min-h-0 flex-col gap-3 p-3">
     <header className="flex items-center gap-2">
-      {onBack && <Button onClick={onBack}>{labels.back}</Button>}
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <h2 className="text-sm font-medium">{state?.room.name || labels.loadingGroup}</h2>
         <CanonicalGroupRoster label={labels.members} labels={labels} members={state?.room.members} phases={phases} />
       </div>
-      <Button disabled={busy || !state?.driver_status} onClick={() => void mutate(() => canonicalGroupRequest(binding, 'groups.stop', { room_id: binding.roomId, cancel_id: crypto.randomUUID() }))}>{labels.stop}</Button>
+      <CanonicalGroupDelete binding={binding} disabled={busy || !state} name={state?.room.name} onDeleted={onDeleted} />
     </header>
     {readError && <div role="alert">{readError}<Button onClick={() => void refresh().catch(e => setReadError(String(e)))}>{labels.refresh}</Button></div>}
     {error && <div role="alert">{error}</div>}
@@ -186,8 +192,9 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
       <Button onClick={() => setDiscard(null)}>{labels.cancel}</Button>
     </div>}
     {pending && <p role="status">{labels.restoredPendingSend}</p>}
+    {context.chips(null)}
     <form className="flex gap-2" onSubmit={event => { event.preventDefault(); send() }}>
-      <CanonicalGroupAttachments attachments={attachments} binding={binding} disabled={composerLocked} onChange={setAttachments} onUploadingChange={setUploading} />
+      <CanonicalGroupAttachments attachments={attachments} binding={binding} disabled={composerLocked} onAddFolder={() => context.addFolders(null)} onChange={setAttachments} onUploadingChange={setUploading} />
       <Textarea aria-label={labels.groupMessage} className="min-w-0 flex-1" disabled={composerLocked} onChange={e => setDraft(e.target.value)} value={draft} />
       <Button disabled={!restored || busy || uploading || (!pending && !draft.trim() && !attachments.length) || !state?.driver_status} type="submit">{pending ? labels.retry : labels.send}</Button>
     </form>

@@ -1,6 +1,8 @@
 import * as sdk from '@hermes/plugin-sdk'
 
 import { type CanonicalGroupAttachment, CanonicalGroupAttachments } from './canonical-group-attachments'
+import { splitGroupContext } from './canonical-group-context'
+import { GroupContextChips } from './canonical-group-context-chips'
 import { useCanonicalGroupLabels } from './canonical-group-labels'
 import type { CanonicalGroupBinding, CanonicalRoomMember } from './canonical-groups'
 
@@ -54,15 +56,20 @@ function EventBody({ event, notice }: { event: CanonicalGroupEvent; notice?: str
     </p>
   }
 
-  const text = event.payload.text || event.payload.content || ''
+  const raw = event.payload.text || event.payload.content || ''
+  // Only the user's own messages carry a composer context block.
+  const context = event.kind === 'message.user' || event.actor?.kind === 'user' ? splitGroupContext(raw) : null
+  const text = context ? context.body : raw
 
-  return <div className="min-w-0 text-xs text-(--ui-text-secondary) [&_p]:mb-1 [&_p:last-child]:mb-0 [&_ul]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:mb-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_pre]:whitespace-pre-wrap [&_pre]:wrap-anywhere" data-selectable-text="true">
+  return <>{text && <div className="min-w-0 text-xs text-(--ui-text-secondary) [&_p]:mb-1 [&_p:last-child]:mb-0 [&_ul]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:mb-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_pre]:whitespace-pre-wrap [&_pre]:wrap-anywhere" data-selectable-text="true">
     {/* The shared renderer (layout and large-message safeguards). media={false}: room text
         may come from another machine, so its MEDIA: paths never resolve against this gateway;
         room files keep their own download path below. */}
     {MessageTextContent ? <MessageTextContent media={false} text={text} />
       : Streamdown ? <Streamdown>{text}</Streamdown> : text}
-  </div>
+  </div>}
+  {context && <GroupContextChips folders={context.folders} projectFolder={context.projectFolder} />}
+  </>
 }
 
 export function CanonicalGroupHistory({ binding, events, members = [], disabled = false }: CanonicalGroupHistoryProps) {

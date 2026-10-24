@@ -1,4 +1,4 @@
-import { Button } from '@hermes/plugin-sdk'
+import { Button, Codicon, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Tip } from '@hermes/plugin-sdk'
 import { useLayoutEffect, useRef, useState } from 'react'
 
 import { downloadCanonicalAttachment } from './canonical-attachment-download'
@@ -17,12 +17,14 @@ function kindFor(file: File): string {
   return 'file'
 }
 
-export function CanonicalGroupAttachments({ binding, attachments, onChange, onUploadingChange, disabled, readOnly = false }: {
+export function CanonicalGroupAttachments({ binding, attachments, onChange, onUploadingChange, onAddFolder, disabled, readOnly = false }: {
   binding: CanonicalGroupBinding
   attachments: Attachment[]
   disabled: boolean
   // C21: the form holds Send while a selected file's manifest is not committed yet.
   onUploadingChange?: (uploading: boolean) => void
+  /** The plug menu's Add folder; without it the menu offers files only. */
+  onAddFolder?: () => void
 } & ({ readOnly: true; onChange?: never } | { readOnly?: false; onChange: (attachments: Attachment[]) => void })) {
   const labels = useCanonicalGroupLabels()
   const input = useRef<HTMLInputElement>(null)
@@ -40,26 +42,31 @@ export function CanonicalGroupAttachments({ binding, attachments, onChange, onUp
     return () => controller.abort()
   }, [binding.connectionId, binding.profile, binding.roomId, disabled, readOnly])
 
-  async function upload(file: File) {
-    if (readOnly) {return}
+  // Sequential: each receipt extends the list the next one appends to.
+  async function upload(files: File[]) {
+    if (readOnly || !files.length) {return}
     setBusy(true); setError(''); onUploadingChange?.(true)
+    let next = attachments
 
     try {
-      const data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result).split(',', 2)[1])
-        reader.onerror = () => reject(reader.error ?? new Error(labels.uploadFailed))
-        reader.readAsDataURL(file)
-      })
+      for (const file of files) {
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result).split(',', 2)[1])
+          reader.onerror = () => reject(reader.error ?? new Error(labels.uploadFailed))
+          reader.readAsDataURL(file)
+        })
 
-      const result = await canonicalGroupRequest<Attachment>(binding, 'groups.attachment.upload', {
-        room_id: binding.roomId, upload_id: crypto.randomUUID(), kind: kindFor(file), name: file.name,
-        mime: file.type || 'application/octet-stream', data_base64: data
-      })
+        const result = await canonicalGroupRequest<Attachment>(binding, 'groups.attachment.upload', {
+          room_id: binding.roomId, upload_id: crypto.randomUUID(), kind: kindFor(file), name: file.name,
+          mime: file.type || 'application/octet-stream', data_base64: data
+        })
 
-      // Upload receipts include storage metadata; Send accepts only the manifest.
-      const { attachment_id, kind, name, mime, size } = result
-      onChange?.([...attachments, { attachment_id, kind, name, mime, size }])
+        // Upload receipts include storage metadata; Send accepts only the manifest.
+        const { attachment_id, kind, name, mime, size } = result
+        next = [...next, { attachment_id, kind, name, mime, size }]
+        onChange?.(next)
+      }
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false); onUploadingChange?.(false) }
   }
@@ -83,10 +90,26 @@ export function CanonicalGroupAttachments({ binding, attachments, onChange, onUp
   }
 
   return <div className="flex flex-wrap items-center gap-2">
-    {!readOnly && <><input hidden onChange={e => { const file = e.target.files?.[0];
-
- if (file) {void upload(file);} e.currentTarget.value = '' }} ref={input} type="file" />
-    <Button disabled={disabled || busy} onClick={() => input.current?.click()} type="button">{labels.attachFiles}</Button></>}
+    {!readOnly && <><input hidden multiple onChange={e => { void upload([...e.target.files ?? []]); e.currentTarget.value = '' }} ref={input} type="file" />
+    <DropdownMenu>
+      <Tip label={labels.addContext}>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label={labels.addContext} disabled={disabled || busy} size="icon" type="button" variant="ghost">
+            <Codicon name="plug" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tip>
+      <DropdownMenuContent align="start" side="top">
+        <DropdownMenuItem onSelect={() => input.current?.click()}>
+          <Codicon className="mr-1.5" name="file-add" />
+          {labels.addFiles}
+        </DropdownMenuItem>
+        {onAddFolder && <DropdownMenuItem onSelect={onAddFolder}>
+          <Codicon className="mr-1.5" name="new-folder" />
+          {labels.addFolder}
+        </DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu></>}
     {attachments.map(a => <span className="flex items-center gap-1" key={a.attachment_id ?? a.name}>
       <span>{a.name}</span><Button disabled={disabled || busy} onClick={() => void download(a)} type="button">{labels.download}</Button>
       {!readOnly && <Button disabled={disabled || busy} onClick={() => onChange?.(attachments.filter(item => item !== a))} type="button">{labels.removeAttachment}</Button>}

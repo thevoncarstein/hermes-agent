@@ -432,3 +432,10 @@ it.each([
   fireEvent.click(item)
   expect(setGroupCreateOpen).toHaveBeenCalledTimes(disabled ? 0 : 1)
 })
+
+it('offers the project folder while the driver check is still pending', async () => {
+  request.mockImplementation(() => new Promise(() => undefined))
+  render(<CreateGroupChatDialog onClose={vi.fn()} open roster={roster} />)
+  expect(await screen.findByText(CANONICAL_GROUP_LOCALES.en.projectFolder)).toBeTruthy()
+  expect(screen.getByRole('button', { name: CANONICAL_GROUP_LOCALES.en.chooseProjectFolder })).toBeTruthy()
+})

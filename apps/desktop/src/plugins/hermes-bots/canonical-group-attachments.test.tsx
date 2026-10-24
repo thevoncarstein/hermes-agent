@@ -1,17 +1,28 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { expectDownloaded, observeDownloads } from './canonical-download-test-utils'
 
 const request = vi.hoisted(() => vi.fn())
-vi.mock('@hermes/plugin-sdk', () => ({
-  host: { requestProfile: request },
-  Button: (props: ComponentProps<'button'>) => <button {...props} />
-}))
+vi.mock('@hermes/plugin-sdk', () => {
+  const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>
+
+  return {
+    host: { requestProfile: request },
+    Button: (props: ComponentProps<'button'>) => <button {...props} />,
+    Codicon: () => null,
+    DropdownMenu: Pass,
+    DropdownMenuContent: Pass,
+    DropdownMenuTrigger: Pass,
+    DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) =>
+      <button onClick={onSelect} role="menuitem" type="button">{children}</button>,
+    Tip: Pass
+  }
+})
 vi.mock('./canonical-group-labels', () => ({
-  useCanonicalGroupLabels: () => ({ attachFiles: 'Attach files', download: 'Download',
-    removeAttachment: 'Remove', uploadFailed: 'Attachment failed' })
+  useCanonicalGroupLabels: () => ({ addContext: 'Add context', addFiles: 'Add files', addFolder: 'Add folder',
+    download: 'Download', removeAttachment: 'Remove', uploadFailed: 'Attachment failed' })
 }))
 
 import { CanonicalGroupAttachments } from './canonical-group-attachments'
@@ -40,7 +51,8 @@ it.each([32, 1_048_576])('uploads all %i bytes using the canonical owner method'
   const changed = vi.fn()
   const submit = vi.fn(event => event.preventDefault())
   const view = render(<form onSubmit={submit}><CanonicalGroupAttachments attachments={[]} binding={binding} disabled={false} onChange={changed} /></form>)
-  fireEvent.click(screen.getByRole('button', { name: 'Attach files' }))
+  expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull()
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add files' }))
   fireEvent.change(view.container.querySelector('input')!, { target: { files: [file] } })
   await waitFor(() => expect(changed).toHaveBeenCalledWith([uploaded]), { timeout: 2000 })
   expect(request).toHaveBeenCalledTimes(1)
@@ -73,4 +85,13 @@ it('downloads only the selected committed attachment from its captured owner', a
   fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
   expect(changed).toHaveBeenCalledWith([])
   expect(submit).not.toHaveBeenCalled()
+})
+
+it('the plug menu offers Add folder when the composer takes folders', () => {
+  const addFolder = vi.fn()
+  render(<CanonicalGroupAttachments attachments={[]} binding={binding} disabled={false} onAddFolder={addFolder} onChange={vi.fn()} />)
+  expect(screen.getByRole('button', { name: 'Add context' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add folder' }))
+  expect(addFolder).toHaveBeenCalledTimes(1)
+  expect(request).not.toHaveBeenCalled()
 })

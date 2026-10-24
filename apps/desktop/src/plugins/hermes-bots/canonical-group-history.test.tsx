@@ -8,18 +8,27 @@ const request = vi.hoisted(() => vi.fn())
 vi.mock('@hermes/plugin-sdk', async () => {
   const { en } = await import('@/i18n/en')
   const { Textarea } = await import('@/components/ui/textarea')
+  const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>
 
   return { Textarea, host: { requestProfile: request }, useI18n: () => ({ locale: 'en', t: en }),
     Button: (props: ComponentProps<'button'>) => <button {...props} />,
     MessageTextContent: ({ text }: { text: string }) => <div data-testid="markdown">{text}</div>,
     Streamdown: ({ children }: { children: ReactNode }) => <div data-testid="markdown">{children}</div>,
-    Codicon: () => <span />, Tip: ({ children }: { children: ReactNode }) => <>{children}</> }
+    Codicon: () => <span />, Tip: ({ children }: { children: ReactNode }) => <>{children}</>,
+    ConfirmDialog: () => null, DropdownMenu: Pass, DropdownMenuContent: Pass, DropdownMenuTrigger: Pass,
+    DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) => <button onClick={onSelect} role="menuitem" type="button">{children}</button> }
 })
+vi.mock('./i18n', async () => {
+  const { CANONICAL_GROUP_LOCALES } = await import('./canonical-group-locales')
+
+  return { useBots: () => ({ canonical: CANONICAL_GROUP_LOCALES.en }) }
+})
+vi.mock('./shared', () => ({ getPluginCtx: () => null }))
 vi.mock('./canonical-group-labels', async () => {
   const { CANONICAL_GROUP_LOCALES } = await import('./canonical-group-locales')
 
-  return { useCanonicalGroupLabels: () => ({ ...CANONICAL_GROUP_LOCALES.en, back: 'Back', refresh: 'Refresh', retry: 'Retry',
-    send: 'Send', stop: 'Stop', download: 'Download', discard: 'Discard', cancel: 'Cancel' }) }
+  return { useCanonicalGroupLabels: () => ({ ...CANONICAL_GROUP_LOCALES.en, refresh: 'Refresh', retry: 'Retry',
+    send: 'Send', download: 'Download', discard: 'Discard', cancel: 'Cancel' }) }
 })
 
 import { CanonicalGroupWorkspace } from './canonical-group-workspace'
@@ -58,7 +67,7 @@ it('keeps a committed file downloadable in history after Send clears the compose
   await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(''))
   const history = within(screen.getByRole('log'))
   await waitFor(() => expect(history.getByText(manifest.name)).toBeTruthy(), { timeout: 2000 })
-  expect(history.queryByRole('button', { name: 'Attach files' })).toBeNull()
+  expect(history.queryByRole('button', { name: 'Add context' })).toBeNull()
   expect(history.queryByRole('button', { name: 'Remove attachment' })).toBeNull()
   expect(view.container.querySelector('form')?.textContent).not.toContain(manifest.name)
   fireEvent.click(history.getByRole('button', { name: 'Download' }))

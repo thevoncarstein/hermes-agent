@@ -9,12 +9,10 @@ export function useCanonicalGroupLabels() {
 
   return {
     ...canonical,
-    back: t.common.back,
     cancel: t.common.cancel,
     refresh: t.common.refresh,
     retry: t.common.retry,
     send: t.common.send,
-    stop: t.composer.stop,
     discard: t.composer.queueLostDiscard,
     download: t.fileMenu.download
   }
