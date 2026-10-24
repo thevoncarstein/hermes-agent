@@ -5,19 +5,34 @@ import { hostedProjectScope, writeGroupProjectFolder } from './canonical-group-c
 import { useCanonicalGroupLabels } from './canonical-group-labels'
 import { type CanonicalGroupBinding, canonicalGroupRequest } from './canonical-groups'
 
-/** The room header's Delete: disband on the authority (which stops any running
- *  work), then hand back so the owner drops the room from Bots. */
+/** Disband on the authority (which stops any running work) and forget the
+ *  room's local project folder. */
+export async function deleteCanonicalGroup(binding: CanonicalGroupBinding) {
+  await canonicalGroupRequest(binding, 'groups.disband', { room_id: binding.roomId, cancel_id: crypto.randomUUID() })
+  writeGroupProjectFolder(hostedProjectScope(binding, binding.roomId), '')
+}
+
+/** The one Delete confirmation, shared by the room header and the roster row's menu. */
+export function CanonicalGroupDeleteDialog({ binding, name, open, onClose, onDeleted }: {
+  binding: CanonicalGroupBinding; name?: string; open: boolean; onClose: () => void; onDeleted?: () => void
+}) {
+  const labels = useCanonicalGroupLabels()
+
+  return <ConfirmDialog confirmLabel={labels.deleteGroup} description={labels.deleteGroupWarning} destructive
+    onClose={onClose}
+    onConfirm={async () => {
+      await deleteCanonicalGroup(binding)
+      onDeleted?.()
+    }}
+    open={open} title={`${labels.deleteGroup}: ${name ?? binding.roomName ?? ''}`} />
+}
+
+/** The room header's Delete; hands back so the owner drops the room from Bots. */
 export function CanonicalGroupDelete({ binding, name, disabled, onDeleted }: {
   binding: CanonicalGroupBinding; name?: string; disabled: boolean; onDeleted?: () => void
 }) {
   const labels = useCanonicalGroupLabels()
   const [open, setOpen] = useState(false)
-
-  const deleteRoom = async () => {
-    await canonicalGroupRequest(binding, 'groups.disband', { room_id: binding.roomId, cancel_id: crypto.randomUUID() })
-    writeGroupProjectFolder(hostedProjectScope(binding, binding.roomId), '')
-    onDeleted?.()
-  }
 
   return <>
     <Tip label={labels.deleteGroup}>
@@ -25,7 +40,6 @@ export function CanonicalGroupDelete({ binding, name, disabled, onDeleted }: {
         <Codicon name="trash" />
       </Button>
     </Tip>
-    <ConfirmDialog confirmLabel={labels.deleteGroup} description={labels.deleteGroupWarning} destructive
-      onClose={() => setOpen(false)} onConfirm={deleteRoom} open={open} title={`${labels.deleteGroup}: ${name ?? binding.roomName ?? ''}`} />
+    <CanonicalGroupDeleteDialog binding={binding} name={name} onClose={() => setOpen(false)} onDeleted={onDeleted} open={open} />
   </>
 }

@@ -15,6 +15,7 @@ import {
   parseRosterKey,
   saveSelectedRosterBot
 } from './bot-state'
+import { $hostedGroupLayout } from './canonical-group-layout'
 import { useCanonicalRosterRooms } from './canonical-group-roster'
 import { CanonicalGroupRow } from './canonical-group-row'
 /**
@@ -332,6 +333,7 @@ export function BotsPane() {
   }, [gatewayFilterExists])
   const hiddenExpanded = useValue($showHiddenBots)
   const canonicalRooms = useCanonicalRosterRooms()
+  const hostedLayout = useValue($hostedGroupLayout)
 
   const {
     activeSourceRoster,
@@ -351,6 +353,7 @@ export function BotsPane() {
     rowKindFilter,
     groupRooms,
     canonicalRooms,
+    hostedLayout,
     activeRosterKeys,
     gatewayOptions,
     activityOf,
@@ -459,7 +462,10 @@ export function BotsPane() {
       entry={row.entry}
       key={row.entry.key}
       members={row.members}
+      onNewSection={key => setSectionDialog({ hostedGroup: key, mode: 'create' })}
       onOpen={key => openGroupChat(key, 'key')}
+      pinned={row.pinned}
+      sectionId={row.sectionId}
     />
   )
 

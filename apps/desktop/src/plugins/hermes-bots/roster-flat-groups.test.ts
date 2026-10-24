@@ -47,6 +47,7 @@ function derive(overrides: Partial<Parameters<typeof deriveRosterRows>[0]> = {})
     rowKindFilter: 'all',
     groupRooms: {},
     canonicalRooms: [],
+    hostedLayout: {},
     activeRosterKeys: new Set(),
     gatewayOptions: rosterGatewayOptions([], roster),
     activityOf: row => activity[row.name] || 0,
@@ -93,6 +94,17 @@ describe('groups in the flat Bots roster', () => {
     expect(order(derive({ canonicalRooms: rooms, rowKindFilter: 'bots' }).rosterRows)).not.toContain('#Team')
     expect(order(derive({ canonicalRooms: rooms, query: 'tea' }).rosterRows)).toEqual(['#Team'])
     expect(order(derive({ canonicalRooms: rooms, query: '@beta' }).rosterRows)).toContain('#Team')
+  })
+
+  it("leads with a hosted group pinned on this machine and files it into this machine's section", () => {
+    const room = hosted('Team', 6_000)
+    const view = derive({ canonicalRooms: [room], hostedLayout: { [room.key]: { pinned: true, sectionId: 's1' } } })
+
+    expect(order(view.rosterRows)[0]).toBe('#Team')
+
+    const blocks = groupRowsBySection(view.rosterRows, [{ id: 's1', name: 'Mine' }], {})
+
+    expect(order(blocks.find(block => block.id === 's1')!.rows)).toEqual(['#Team'])
   })
 
   it('never files a hosted room into the section of a bot that shares its name', () => {

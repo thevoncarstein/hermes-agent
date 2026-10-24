@@ -1,3 +1,5 @@
+import { hostedGroupPinned, hostedGroupSectionId } from './canonical-group-layout'
+import type { HostedGroupLayout } from './canonical-group-layout'
 import type { CanonicalRosterRoom } from './canonical-group-roster'
 import { botActivitySession } from './data'
 import { botRosterKey, filterBots, preferReachableSameNameRows } from './data'
@@ -28,8 +30,8 @@ export interface RosterGroupRow {
   name: string
   pinned: boolean
 }
-/** A gateway-hosted room. It has no local room record, so it is never pinned,
- *  ordered or filed into a section: it sits in the list by recency. */
+/** A gateway-hosted room. Its pin and section come from this machine's
+ *  hosted-group layout (`canonical-group-layout.ts`), not a room record. */
 export interface RosterCanonicalGroupRow {
   active: boolean
   activity: number
@@ -37,7 +39,8 @@ export interface RosterCanonicalGroupRow {
   kind: 'canonical'
   members: GroupMember[]
   name: string
-  pinned: false
+  pinned: boolean
+  sectionId: null | string
 }
 
 /** A hosted room's members as roster bots, so the row can draw their faces.
@@ -80,6 +83,7 @@ interface RosterRowsInput {
   rowKindFilter: RosterKindFilter
   groupRooms: ReturnType<typeof $groupChats.get>
   canonicalRooms: CanonicalRosterRoom[]
+  hostedLayout: Record<string, HostedGroupLayout>
   activeRosterKeys: Set<string>
   gatewayOptions: ReturnType<typeof rosterGatewayOptions>
   activityOf: (bot: RosterRow) => number
@@ -95,6 +99,7 @@ export function deriveRosterRows({
   rowKindFilter,
   groupRooms,
   canonicalRooms,
+  hostedLayout,
   activeRosterKeys,
   gatewayOptions,
   activityOf,
@@ -160,7 +165,8 @@ export function deriveRosterRows({
         entry,
         name: entry.room.name,
         members,
-        pinned: false,
+        pinned: hostedGroupPinned(entry.key, hostedLayout),
+        sectionId: hostedGroupSectionId(entry.key, hostedLayout),
         activity,
         active:
           Boolean(activity && Date.now() - activity <= ACTIVE_WINDOW_S * 1000) ||

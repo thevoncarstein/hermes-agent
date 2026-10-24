@@ -32,7 +32,9 @@ import type { BotMeta, GroupChat, RosterRow } from './types'
 /** The one section-name dialog's state: New section (optionally filing the
  *  bot or group whose menu opened it) or Rename. */
 export type SectionDialogState =
-  null | { bot?: RosterRow; group?: string; mode: 'create' } | { id: string; mode: 'rename'; name: string }
+  | null
+  | { bot?: RosterRow; group?: string; hostedGroup?: string; mode: 'create' }
+  | { id: string; mode: 'rename'; name: string }
 
 export const UNASSIGNED_SECTION_KEY = 'section:unassigned'
 export const BOT_SECTIONS_KEY = 'bot-sections-v1'
@@ -388,11 +390,11 @@ export function groupRowsBySection<TRow extends { bot?: RosterRow } | RosterRow>
     const kind = (row as { kind?: string })?.kind
     const group = kind === 'group' ? row : null
 
-    // A gateway-hosted room has no local record to carry a section, and its
-    // name must never be read as a bot's: it always lands in Unassigned.
+    // A gateway-hosted room carries its section on the row (from this
+    // machine's hosted-group layout); its name must never be read as a bot's.
     const id =
       kind === 'canonical'
-        ? null
+        ? (row as { sectionId?: null | string }).sectionId || null
         : group
           ? groupChatSectionId(String((group as { name?: string }).name || ''), groupRooms)
           : botSectionId(((row as { bot?: RosterRow })?.bot || row) as RosterRow, metaByName)

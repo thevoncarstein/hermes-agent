@@ -38,6 +38,7 @@ import {
   focusedMentionProfile
 } from './bot-state'
 import { isCanonicalChatOnScreen, openBotCanonicalChat } from './canonical-chat'
+import { loadHostedGroupLayout } from './canonical-group-layout'
 import { BotChatEmpty } from './chat-empty'
 import { bindProfileSync, RoutinesPane } from './cron'
 import {
@@ -117,6 +118,7 @@ export default {
     // The user's own roster sections. Read once at register; every mutation
     // writes through.
     loadBotSections()
+    loadHostedGroupLayout()
     const disposeLocales = ctx.i18n.register(BOTS_LOCALES)
     setGroupChatSyncDisposed(false)
     startFaceClock()

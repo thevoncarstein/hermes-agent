@@ -1,6 +1,7 @@
 import { host } from '@hermes/plugin-sdk'
 import type { ReactNode } from 'react'
 
+import { HOSTED_GROUP_DRAG_PREFIX, hostedGroupDragKey, moveHostedGroupToSection } from './canonical-group-layout'
 import { botRosterKey } from './data'
 import type { useBots } from './i18n'
 import type { RosterCanonicalGroupRow, RosterGroupRow } from './roster-pane-derivation'
@@ -80,7 +81,11 @@ export function rosterSectionRenderers({
         : renderBotRow(row.bot, keyPrefix)
 
   const dragKeyOf = (row: UserSectionRow) =>
-    row.kind === 'group' ? groupDragKey(row.name) : row.kind === 'canonical' ? null : botRosterKey(row.bot)
+    row.kind === 'group'
+      ? groupDragKey(row.name)
+      : row.kind === 'canonical'
+        ? hostedGroupDragKey(row.entry.key)
+        : botRosterKey(row.bot)
 
   const renderUserSections = (rows: UserSectionRow[], keyPrefix = '') => {
     // No sections made: the plain list, exactly as before this feature.
@@ -116,6 +121,12 @@ export function rosterSectionRenderers({
               onDropBot={rosterKey => {
                 // `block.id` is null for Unassigned, which is exactly the value
                 // both movers want for "clear the assignment".
+                if (rosterKey.startsWith(HOSTED_GROUP_DRAG_PREFIX)) {
+                  moveHostedGroupToSection(rosterKey.slice(HOSTED_GROUP_DRAG_PREFIX.length), block.id)
+
+                  return
+                }
+
                 if (rosterKey.startsWith(GROUP_DRAG_PREFIX)) {
                   moveGroupChatsToSection([rosterKey.slice(GROUP_DRAG_PREFIX.length)], block.id)
 
