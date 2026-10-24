@@ -42,6 +42,7 @@ import { avatarColor, botAppearance, BotFace } from './avatar'
 import { isBackfilledFacePng } from './avatar-image'
 import { groupCreationSource, groupDrivenByDesktop, groupExecutionMode } from './canonical-group-capabilities'
 import type { GroupExecutionMode } from './canonical-group-capabilities'
+import { localProjectScope } from './canonical-group-context'
 import type { CanonicalGroupOrigin } from './canonical-group-registry'
 import {
   $canonicalGroupBindings,
@@ -92,6 +93,7 @@ import { GroupClarifyCard, GroupImageControls, GroupMentionInput } from './group
 import type { GroupRoomPrompt } from './group-chat-parts'
 import { GroupMemberPicker } from './group-chat-view-members'
 import { compressGroupMemberHistory } from './group-compress'
+import { GroupContextMenu, groupEntryContext, useGroupContextFolders } from './group-context-folders'
 import { stickyGroupEngine } from './group-engine'
 import { sweepExternalGroupWrites } from './group-external-writes'
 import { GroupHoldStatus } from './group-hold-status'
@@ -712,15 +714,8 @@ function GroupExecutionGate(props: GroupChatWorkspaceProps) {
   </div>
 }
 
-function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: GroupChatWorkspaceProps) {
-  const b = useBots()
-  const rooms: Record<string, GroupChatRoom> = useValue($groupChats)
-  const allMeta: Record<string, BotMeta> = useValue($botMeta)
-  // A former member's line is labelled from the live roster (renderEntry).
-  const liveRoster: RosterRow[] = useValue($lastRoster)
-
-  const room: GroupChatRoom = rooms[group] || { log: [], running: false }
-
+/** The room's persisted composer drafts, following the room to its new key when it is renamed. */
+function useGroupComposerDraft(group: string, room: GroupChatRoom) {
   const composerKey = groupComposerDraftKey(group, room)
   const composerKeyRef = useRef(composerKey)
   const [composerDraft, setComposerDraft] = useState(() => groupComposerDraftSnapshot(composerKey))
@@ -736,6 +731,21 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
 
     return next
   }
+
+  return { composerDraft, composerKey, composerKeyRef, setComposerDraft, updateComposerDraft }
+}
+
+function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: GroupChatWorkspaceProps) {
+  const b = useBots()
+  const rooms: Record<string, GroupChatRoom> = useValue($groupChats)
+  const allMeta: Record<string, BotMeta> = useValue($botMeta)
+  // A former member's line is labelled from the live roster (renderEntry).
+  const liveRoster: RosterRow[] = useValue($lastRoster)
+
+  const room: GroupChatRoom = rooms[group] || { log: [], running: false }
+
+  const context = useGroupContextFolders(localProjectScope(room.roomId, group), b.canonical)
+  const { composerDraft, composerKey, composerKeyRef, setComposerDraft, updateComposerDraft } = useGroupComposerDraft(group, room)
 
   const draft = composerDraft.main || ''
   const replyDrafts = composerDraft.replies || {}
@@ -1194,7 +1204,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
     // Main composer = START A NEW THREAD with the whole group (Slack shape).
     // Full descriptors ride into the turn loop: remote members keep their
     // connection fields so their turns route to their own machines.
-    const minted = sendToGroupChat(group, memberDescriptors(), text, null, images)
+    const minted = context.send(text, null, composed => sendToGroupChat(group, memberDescriptors(), composed, null, images))
 
     if (!minted) {
       const restored = restoreGroupComposerDraft(composerKeyRef.current, cleared.revision, before)
@@ -1229,7 +1239,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
 
     // Reply box = CONTINUE this thread; the member turns it triggers are
     // scoped to it.
-    const sent = sendToGroupChat(group, memberDescriptors(), text, thread, images)
+    const sent = context.send(text, thread, composed => sendToGroupChat(group, memberDescriptors(), composed, thread, images))
 
     if (!sent) {
       const restored = restoreGroupComposerDraft(composerKeyRef.current, cleared.revision, before)
@@ -1283,18 +1293,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   }
 
   const attachButton = (thread: null | string) => (
-    <Tip label={b.group.attachHint}>
-      <Button
-        aria-label={b.group.attachHint}
-        className="shrink-0 text-(--ui-text-tertiary) hover:text-foreground"
-        onClick={() => void pickGroupAttachments().then(picked => addImages(thread, picked))}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <Codicon name="attach" />
-      </Button>
-    </Tip>
+    <GroupContextMenu onAddFiles={() => void pickGroupAttachments().then(picked => addImages(thread, picked))} onAddFolder={() => context.addFolders(thread)} />
   )
 
   // #91359: recognized @mentions render as inline references; recomputed
@@ -1351,6 +1350,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   // One log entry, rendered exactly as before conversation folding existed.
   const renderEntry = (entry: GroupMessage, index: number) => {
     const isUser = entry.from.kind === 'user'
+    const { text, chips: contextChips } = groupEntryContext(entry, b.canonical)
     const meta = groupTranscriptSpeakerMeta(entry, members, allMeta, liveRoster)
 
     // Match this speaker back to its member descriptor so display
@@ -1376,7 +1376,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
     // Speaker avatar: same appearance pipeline as the roster (speakerFace).
     // Source-qualified speakers use owner-aware botRosterMeta (#96432).
     // The user's own lines carry no avatar.
-    const actions = entry.text.trim() || !isUser ? (
+    const actions = text.trim() || !isUser ? (
       <>
         {isUser ? null : (
           <Tip label={`Reply to @${replyMentionTag(entry, member)}`}>
@@ -1391,7 +1391,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
             </Button>
           </Tip>
         )}
-        {entry.text.trim() ? <CopyButton appearance="icon" buttonSize="icon" stopPropagation text={entry.text} /> : null}
+        {text.trim() ? <CopyButton appearance="icon" buttonSize="icon" stopPropagation text={text} /> : null}
       </>
     ) : undefined
 
@@ -1426,13 +1426,14 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
           data-slot="group-chat-message-content"
         >
           {MessageTextContent ? (
-            <MessageTextContent decorateText={mentionText} media={!member?.remoteSource} text={entry.text} />
+            <MessageTextContent decorateText={mentionText} media={!member?.remoteSource} text={text} />
           ) : Streamdown ? (
-            <Streamdown components={mentionComponents}>{entry.text}</Streamdown>
+            <Streamdown components={mentionComponents}>{text}</Streamdown>
           ) : (
-            entry.text
+            text
           )}
         </div>
+          {contextChips}
           {/* User attachments: what every responding bot was */
         /* shown — image previews, or a named chip for */
         /* PDFs/files. */}
@@ -1490,7 +1491,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
             submitReply(id)
           }}
         >
-          {attachmentRow(id)}
+          {attachmentRow(id)}{context.chips(id)}
           <div className="flex items-center gap-1.5">
             <GroupMentionInput
               aria-label={b.group.replyInThread}
@@ -1603,7 +1604,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
       </div>
       <div className="px-4">
       <RoomComposer
-        above={attachmentRow(null)}
+        above={<>{attachmentRow(null)}{context.chips(null)}</>}
         attach={<div className={ROOM_COMPOSER_AREAS.button}>{attachButton(null)}</div>}
         canSend={Boolean(draft.trim() || imagesFor(null).length)}
         className="mx-auto w-full max-w-3xl"
@@ -1654,6 +1655,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
         onConfirm={async () => {
           clearGroupComposerDraft(composerKeyRef.current)
           await disbandGroupChat(group, members)
+          context.clearProject()
           host.notify({
             kind: 'success',
             message: b.group.disbanded(group)

@@ -3,6 +3,8 @@ import { Codicon, Tip } from '@hermes/plugin-sdk'
 import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { type CanonicalGroupAttachment, CanonicalGroupAttachments, fetchCanonicalGroupAttachment } from './canonical-group-attachments'
+import { splitGroupContext } from './canonical-group-context'
+import { GroupContextChips } from './canonical-group-context-chips'
 import { useCanonicalGroupLabels } from './canonical-group-labels'
 import { ASSIGNMENT_EVENT_KIND, CanonicalGroupAssignmentRow } from './canonical-group-lead'
 import type { CanonicalGroupBinding, CanonicalRoomMember } from './canonical-groups'
@@ -62,6 +64,7 @@ function eventTimeMs(timestamp?: number) {
 }
 
 function EventBody({ event, notice }: { event: CanonicalGroupEvent; notice?: string }) {
+  const labels = useCanonicalGroupLabels()
   if (notice) {
     const detail = event.payload.error || event.payload.reason || event.payload.reason_code
 
@@ -70,13 +73,18 @@ function EventBody({ event, notice }: { event: CanonicalGroupEvent; notice?: str
     </p>
   }
 
-  const text = event.payload.text || event.payload.content || ''
+  const raw = event.payload.text || event.payload.content || ''
+  // Only the user's own messages carry a composer context block.
+  const context = event.kind === 'message.user' || event.actor?.kind === 'user' ? splitGroupContext(raw) : null
+  const text = context ? context.body : raw
 
   // The shared renderer (layout and large-message safeguards). media={false}: room text
   // may come from another machine, so its MEDIA: paths never resolve against this gateway;
   // room files keep their own download path below.
-  return MessageTextContent ? <MessageTextContent media={false} text={text} />
+  const body = MessageTextContent ? <MessageTextContent media={false} text={text} />
     : Streamdown ? <Streamdown>{text}</Streamdown> : <>{text}</>
+
+  return context ? <>{text && body}<GroupContextChips folders={context.folders} labels={labels} projectFolder={context.projectFolder} /></> : body
 }
 
 // Previews download the whole file over RPC; larger or unsized images keep only Download.

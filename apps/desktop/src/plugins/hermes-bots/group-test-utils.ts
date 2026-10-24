@@ -21,6 +21,7 @@
  */
 
 import type { PluginContext } from '@hermes/plugin-sdk'
+import type { ReactNode } from 'react'
 import { vi } from 'vitest'
 
 /** One message in a scripted session transcript, in the gateway's own shape. */
@@ -455,6 +456,7 @@ export function createGroupGateway(options: GatewayOptions = {}): ScriptedGatewa
  *  the `vi.mock` factory rather than hoisted alongside it. */
 export async function pluginSdkMock(host: Record<string, unknown>) {
   const nanostores = await import('nanostores')
+  const { createElement, Fragment } = await import('react')
   const { Textarea } = await import('@/components/ui/textarea')
   const { cn } = await import('@/lib/utils')
   const { randomUuid } = await import('@hermes/shared')
@@ -463,8 +465,15 @@ export async function pluginSdkMock(host: Record<string, unknown>) {
   const { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } =
     await import('@/components/ui/context-menu')
 
+  const Pass = ({ children }: { children?: ReactNode }) => createElement(Fragment, null, children)
+
   return {
     Textarea,
+    DropdownMenu: Pass,
+    DropdownMenuContent: Pass,
+    DropdownMenuTrigger: Pass,
+    DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) =>
+      createElement('button', { onClick: onSelect, role: 'menuitem', type: 'button' }, children),
     ContextMenu,
     ContextMenuContent,
     ContextMenuItem,

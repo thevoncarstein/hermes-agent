@@ -1,4 +1,4 @@
-import { Button, cn, Codicon, GHOST_ICON_BTN, randomUuid, Tip } from '@hermes/plugin-sdk'
+import { Button, cn, Codicon, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, GHOST_ICON_BTN, randomUuid, Tip } from '@hermes/plugin-sdk'
 import { type Ref, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 
 import { downloadCanonicalAttachment } from './canonical-attachment-download'
@@ -27,7 +27,7 @@ function kindFor(file: File): string {
   return 'file'
 }
 
-export function CanonicalGroupAttachments({ binding, attachments, onChange, onUploadingChange, disabled, readOnly = false, ref }: {
+export function CanonicalGroupAttachments({ binding, attachments, onChange, onUploadingChange, onAddFolder, disabled, readOnly = false, ref }: {
   binding: CanonicalGroupBinding
   attachments: Attachment[]
   disabled: boolean
@@ -35,6 +35,8 @@ export function CanonicalGroupAttachments({ binding, attachments, onChange, onUp
   onUploadingChange?: (uploading: boolean) => void
   // Paste and drop in the composer reuse this upload path.
   ref?: Ref<CanonicalGroupUploader>
+  /** The plug menu's Add folder; without it the menu offers files only. */
+  onAddFolder?: () => void
 } & ({ readOnly: true; onChange?: never } | { readOnly?: false; onChange: (attachments: Attachment[]) => void })) {
   const labels = useCanonicalGroupLabels()
   const input = useRef<HTMLInputElement>(null)
@@ -123,15 +125,26 @@ export function CanonicalGroupAttachments({ binding, attachments, onChange, onUp
   if (readOnly) {return chips || null}
 
   return <>
-    <input hidden onChange={e => { const file = e.target.files?.[0]
-
-      if (file) {void upload([file])}
-      e.currentTarget.value = '' }} ref={input} type="file" />
-    <Tip label={labels.attachFiles}>
-      <Button aria-label={labels.attachFiles} className={cn(GHOST_ICON_BTN, ROOM_COMPOSER_AREAS.button)} disabled={disabled || busy} onClick={() => input.current?.click()} size="icon" type="button" variant="ghost">
-        <Codicon name="add" size="0.875rem" />
-      </Button>
-    </Tip>
+    <input hidden multiple onChange={e => { void upload([...e.target.files ?? []]); e.currentTarget.value = '' }} ref={input} type="file" />
+    <DropdownMenu>
+      <Tip label={labels.addContext}>
+        <DropdownMenuTrigger asChild>
+          <Button aria-label={labels.addContext} className={cn(GHOST_ICON_BTN, ROOM_COMPOSER_AREAS.button)} disabled={disabled || busy} size="icon" type="button" variant="ghost">
+            <Codicon name="plug" size="0.875rem" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tip>
+      <DropdownMenuContent align="start" side="top">
+        <DropdownMenuItem onSelect={() => input.current?.click()}>
+          <Codicon className="mr-1.5" name="file-add" />
+          {labels.addFiles}
+        </DropdownMenuItem>
+        {onAddFolder && <DropdownMenuItem onSelect={onAddFolder}>
+          <Codicon className="mr-1.5" name="new-folder" />
+          {labels.addFolder}
+        </DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
     {chips}
   </>
 }

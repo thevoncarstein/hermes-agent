@@ -16,6 +16,7 @@ import type { ReadableAtom } from 'nanostores'
 
 import { pluginRest, type PluginRestOptions, pluginSocket } from '@/hermes'
 import { createPluginI18n, type PluginI18n } from '@/i18n'
+import { selectDesktopPaths } from '@/lib/desktop-fs'
 import {
   listPluginAppActions,
   type PluginAppActionId,
@@ -84,6 +85,10 @@ export interface PluginOs {
   /** Native open dialog, single file. Resolves the chosen path, or null on
    *  cancel / when unavailable. */
   pickOpenPath: (options?: PluginFileDialogOptions) => Promise<null | string>
+  /** Open dialog for files or folders on the ACTIVE BACKEND's filesystem: the
+   *  native dialog locally, the remote folder browser for a remote gateway's
+   *  folders. Resolves [] on cancel / when unavailable. */
+  pickPaths: (options?: PluginFileDialogOptions & { directories?: boolean; multiple?: boolean }) => Promise<string[]>
   /** Write text to the system clipboard. Resolves false when unavailable. */
   writeClipboard: (text: string) => Promise<boolean>
 }
@@ -280,6 +285,13 @@ function createPluginOs(pluginId: string): PluginOs {
 
         return picked?.[0] ?? null
       }),
+    pickPaths: async options => {
+      try {
+        return await selectDesktopPaths(options)
+      } catch {
+        return []
+      }
+    },
     pickSavePath: options => attemptPath(async bridge => (await bridge.selectSavePath?.(options)) ?? null),
     revealPath: path => attempt(async bridge => (bridge.revealPath ? bridge.revealPath(path) : false)),
     writeClipboard: text => attempt(bridge => bridge.writeClipboard(text))

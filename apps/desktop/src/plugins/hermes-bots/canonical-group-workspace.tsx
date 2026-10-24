@@ -3,6 +3,7 @@ import { type ClipboardEvent, type DragEvent, useEffect, useRef, useState } from
 
 import { type CanonicalDriverActivity, CanonicalGroupCycle, CanonicalGroupTyping, canonicalMemberName, useCanonicalRoomLive } from './canonical-group-activity'
 import { CanonicalGroupAttachments, type CanonicalGroupUploader } from './canonical-group-attachments'
+import { hostedProjectScope } from './canonical-group-context'
 import { CanonicalGroupDetails, CanonicalPendingCard, holdCanonicalRoomLive, publishCanonicalRoomLive, useStickToBottom } from './canonical-group-details'
 import { CanonicalGroupHeader } from './canonical-group-header'
 import { type CanonicalGroupEvent, CanonicalGroupHistory } from './canonical-group-history'
@@ -15,6 +16,7 @@ import type { PreparedCanonicalGroupSend } from './canonical-group-send'
 import { actCanonicalGroup, canonicalGroupRequest } from './canonical-groups'
 import type { CanonicalGroupBinding, CanonicalPendingAction, CanonicalRoom, CanonicalRoomContext, CanonicalRoomMember } from './canonical-groups'
 import { GroupMentionInput } from './group-chat-parts'
+import { useGroupContextFolders } from './group-context-folders'
 import { RoomBotAvatar } from './group-room-avatar'
 import { fill, ROOM_COMPOSER_INPUT_CLASS, RoomComposer, RoomReplyChip } from './group-room-ui'
 
@@ -64,6 +66,7 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
   const busyRef = useRef(false)
   const alive = useRef(true)
   const [discard, setDiscard] = useState<CanonicalPendingAction | null>(null)
+  const context = useGroupContextFolders(hostedProjectScope(initialBinding, initialBinding.roomId), labels)
   const revision = useRef(0)
   // This window's typed draft while it sends the room's one pending intent another window prepared.
   const heldDraft = useRef<{ text: string; attachments: Attachment[]; reply: RoomReply | null } | null>(null)
@@ -153,13 +156,16 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
   const send = () => {
     if (!restored || busyRef.current || uploading || !state?.driver_status || (!pending && !draft.trim() && !attachments.length)) {return}
     void mutate(async () => {
-      const exact = pending ?? await prepareCanonicalGroupSend(binding, { text: draft, attachments, ...(reply?.thread ? { thread_id: reply.thread } : {}) })
+      const text = context.compose(draft, null)
+      const exact = pending ?? await prepareCanonicalGroupSend(binding, { text, attachments, ...(reply?.thread ? { thread_id: reply.thread } : {}) })
 
       if (!alive.current) {return}
 
       // Another window won the room's slot: send its intent first, keep this window's words.
-      if (!pending && !sameGroupPayload(exact.params.payload, draft, attachments, reply?.thread)) {
+      if (!pending && !sameGroupPayload(exact.params.payload, text, attachments, reply?.thread)) {
         heldDraft.current = { text: draft, attachments, reply }
+      } else {
+        context.clearFolders(null)
       }
 
       setPending(exact)
@@ -270,9 +276,9 @@ function CanonicalRoomView({ binding: initialBinding, visible, onBack }: {
       {restoredPending && <p className="px-4 pb-1 text-[0.6875rem] text-(--ui-text-tertiary)" role="status">{labels.restoredPendingSend}</p>}
       <div className="px-4">
       <RoomComposer
-        above={reply && <RoomReplyChip cancelLabel={labels.cancelReply} label={fill(labels.replyingTo, { name: reply.name })}
-          onCancel={() => setReply(null)} quote={reply.quote} />}
-        attach={<CanonicalGroupAttachments attachments={attachments} binding={binding} disabled={composerLocked} onChange={setAttachments} onUploadingChange={setUploading} ref={uploader} />}
+        above={<>{context.chips(null)}{reply && <RoomReplyChip cancelLabel={labels.cancelReply} label={fill(labels.replyingTo, { name: reply.name })}
+          onCancel={() => setReply(null)} quote={reply.quote} />}</>}
+        attach={<CanonicalGroupAttachments attachments={attachments} binding={binding} disabled={composerLocked} onAddFolder={() => context.addFolders(null)} onChange={setAttachments} onUploadingChange={setUploading} ref={uploader} />}
         canSend={canSend}
         className="mx-auto w-full max-w-3xl"
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) {event.preventDefault()} }}

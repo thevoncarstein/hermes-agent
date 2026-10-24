@@ -55,6 +55,7 @@ import {
   useGroupCapability
 } from './canonical-group-capabilities'
 import type { GroupCapabilityState, GroupCreationEngine } from './canonical-group-capabilities'
+import { hostedProjectScope, localProjectScope, pickGroupFolders, writeGroupProjectFolder } from './canonical-group-context'
 import { refreshGatewayGroupRooms, registerCanonicalGroup } from './canonical-group-registry'
 import type { CanonicalGroupOrigin } from './canonical-group-registry'
 import { canonicalGroupRequest, createCanonicalGroup } from './canonical-groups'
@@ -1289,7 +1290,8 @@ function persistDesktopDrivenGroup(
   image: null | string,
   sourceCurrent: () => boolean,
   unavailable: string,
-  connectionId: null | string
+  connectionId: null | string,
+  projectFolder: string
 ): string {
   // Creating a group is always a FRESH room. Without this, re-creating a
   // group under an existing name (easy — the default name is just the
@@ -1322,6 +1324,7 @@ function persistDesktopDrivenGroup(
   // member becomes remote after a source switch and cannot rely on the new
   // gateway's name-keyed bot metadata to remain seated in this room.
   const roomMembers = durableGroupChatMembers(selected)
+  writeGroupProjectFolder(localProjectScope(roomId, groupName), projectFolder)
   updateGroupChat(groupName, (room: GroupChatRoom) => {
     room.members = roomMembers
     room.roomId = roomId
@@ -1406,6 +1409,7 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [name, setName] = useState('')
   const [image, setImage] = useState<null | string>(null)
+  const [projectFolder, setProjectFolder] = useState('')
 
   // Reset per open so a cancelled draft doesn't leak into the next one.
   useEffect(() => {
@@ -1414,6 +1418,7 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
       setChecked({})
       setName('')
       setImage(null)
+      setProjectFolder('')
     }
   }, [open])
 
@@ -1472,6 +1477,7 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
 
       // Creation already succeeded; leave it on its owner without adopting a stale result.
       if (!sourceCurrent()) {return}
+      writeGroupProjectFolder(hostedProjectScope(route, created.room.room_id), projectFolder)
       const key = registerCanonicalGroup(route, created.room)
       refreshGatewayGroupRooms()
       onClose()
@@ -1480,7 +1486,7 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
       return
     }
 
-    const groupName = persistDesktopDrivenGroup(base, selected, allMeta, image, sourceCurrent, b.canonical.driverUnavailable, route.connectionId)
+    const groupName = persistDesktopDrivenGroup(base, selected, allMeta, image, sourceCurrent, b.canonical.driverUnavailable, route.connectionId, projectFolder)
     host.notify({
       kind: 'info',
       message: `“${groupName}” created with ${selected.length} bots`
@@ -1610,6 +1616,47 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
             seedMembers={selected.map(bot => displayName(bot, botRosterMeta(bot, allMeta)))}
             seedName={name.trim() || (selected.length ? placeholder : '')}
           />
+          {/* Both create paths save the folder, so the row never waits on the driver check. */}
+          {mode !== 'unavailable' && (
+            <div className="grid gap-1">
+              <div className="text-xs font-medium text-(--ui-text-secondary)">{b.canonical.projectFolder}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="root-folder" />
+                <span
+                  className={cn('min-w-0 flex-1 truncate text-xs', !projectFolder && 'text-(--ui-text-quaternary)')}
+                  title={projectFolder || undefined}
+                >
+                  {projectFolder || b.canonical.noProjectFolder}
+                </span>
+                {projectFolder ? (
+                  <Tip label={b.canonical.removeContext}>
+                    <Button
+                      aria-label={b.canonical.removeContext}
+                      onClick={() => setProjectFolder('')}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <Codicon name="close" />
+                    </Button>
+                  </Tip>
+                ) : null}
+                <Button
+                  onClick={() =>
+                    void pickGroupFolders(b.canonical.projectFolder, false).then(([picked]) => {
+                      if (picked) {
+                        setProjectFolder(picked)
+                      }
+                    })
+                  }
+                  size="sm"
+                  variant="secondary"
+                >
+                  {b.canonical.chooseProjectFolder}
+                </Button>
+              </div>
+              <div className="text-[0.625rem] text-(--ui-text-quaternary)">{b.canonical.projectFolderHint}</div>
+            </div>
+          )}
           <form
             onSubmit={event => {
               event.preventDefault()

@@ -27,7 +27,7 @@ it('provides translated canonical group controls and recovery copy in every supp
   for (const locale of Object.keys(TRANSLATIONS) as Array<keyof typeof TRANSLATIONS>) {
     active.locale = locale
     const { result, unmount } = renderHook(useCanonicalGroupLabels)
-    expect(result.current.back).toBe(TRANSLATIONS[locale].common.back)
+    expect(result.current.cancel).toBe(TRANSLATIONS[locale].common.cancel)
     expect(result.current.download).toBe(TRANSLATIONS[locale].fileMenu.download)
     const messages = BOTS_LOCALES[locale]?.canonical as Record<string, string> | undefined
     expect(messages, locale).toBeDefined()
