@@ -1,6 +1,6 @@
 interface OrderRow {
   activity: number
-  kind: 'bot' | 'group'
+  kind: 'bot' | 'canonical' | 'group'
   name?: string
   pinned: boolean
 }
@@ -23,25 +23,4 @@ export function sortGroupRosterRows<T extends OrderRow>(
   let index = 0
 
   return legacy.map(row => (row.kind === 'group' ? groups[index++] : row))
-}
-
-/** Swap visible neighbours without dropping filtered-out rooms from the order. */
-export function reorderGroupRows(rows: OrderRow[], name: string, delta: -1 | 1, visible?: string[]): string[] | null {
-  const row = rows.find(row => row.name === name)
-
-  const band = rows.filter(
-    candidate =>
-      candidate.kind === 'group' && candidate.pinned === row?.pinned && (!visible || visible.includes(candidate.name!))
-  )
-
-  const index = band.findIndex(candidate => candidate.name === name)
-  const neighbour = index >= 0 ? band[index + delta] : undefined
-
-  if (!neighbour) {
-    return null
-  }
-
-  return rows
-    .filter(row => row.kind === 'group')
-    .map(row => (row.name === name ? neighbour.name! : row.name === neighbour.name ? name : row.name!))
 }

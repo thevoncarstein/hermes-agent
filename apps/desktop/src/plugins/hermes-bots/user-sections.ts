@@ -385,11 +385,17 @@ export function groupRowsBySection<TRow extends { bot?: RosterRow } | RosterRow>
   const loose: TRow[] = []
 
   for (const row of rows || []) {
-    const group = (row as { kind?: string; name?: string })?.kind === 'group' ? row : null
+    const kind = (row as { kind?: string })?.kind
+    const group = kind === 'group' ? row : null
 
-    const id = group
-      ? groupChatSectionId(String((group as { name?: string }).name || ''), groupRooms)
-      : botSectionId(((row as { bot?: RosterRow })?.bot || row) as RosterRow, metaByName)
+    // A gateway-hosted room has no local record to carry a section, and its
+    // name must never be read as a bot's: it always lands in Unassigned.
+    const id =
+      kind === 'canonical'
+        ? null
+        : group
+          ? groupChatSectionId(String((group as { name?: string }).name || ''), groupRooms)
+          : botSectionId(((row as { bot?: RosterRow })?.bot || row) as RosterRow, metaByName)
 
     if (id && known.has(id)) {
       byId.get(id)!.push(row)

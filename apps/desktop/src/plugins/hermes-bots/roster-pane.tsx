@@ -15,7 +15,8 @@ import {
   parseRosterKey,
   saveSelectedRosterBot
 } from './bot-state'
-import { CanonicalGroupList } from './canonical-group-registry'
+import { useCanonicalRosterRooms } from './canonical-group-roster'
+import { CanonicalGroupRow } from './canonical-group-row'
 /**
  * The Bots pane itself: the roster's selection reconciliation, the
  * workspace-ownership reads its lifecycle keys off, and the pane that lists
@@ -43,6 +44,7 @@ import { useBots } from './i18n'
 import { $activityToasts } from './roster-actions'
 import { renderRosterContent } from './roster-pane-content'
 import { deriveRosterPresentation, deriveRosterRows, sortRosterBots } from './roster-pane-derivation'
+import type { RosterCanonicalGroupRow } from './roster-pane-derivation'
 import { renderRosterDialogs } from './roster-pane-dialogs'
 import { RosterGroupRowView } from './roster-pane-groups'
 import { $lastSources, usePublishRosterSnapshot } from './roster-pane-lifecycle'
@@ -329,6 +331,7 @@ export function BotsPane() {
     }
   }, [gatewayFilterExists])
   const hiddenExpanded = useValue($showHiddenBots)
+  const canonicalRooms = useCanonicalRosterRooms()
 
   const {
     activeSourceRoster,
@@ -337,7 +340,6 @@ export function BotsPane() {
     filteredHiddenBots,
     groupNames,
     rosterRows,
-    sortedGroupRows,
     gatewaySections,
     showGatewaySections
   } = deriveRosterRows({
@@ -348,6 +350,7 @@ export function BotsPane() {
     activityFilter,
     rowKindFilter,
     groupRooms,
+    canonicalRooms,
     activeRosterKeys,
     gatewayOptions,
     activityOf,
@@ -439,21 +442,28 @@ export function BotsPane() {
   const renderGroupRow = (row: { members: GroupMember[]; name: string }) => (
     <RosterGroupRowView
       active={groupChatName === row.name}
-      b={b}
       group={row.name}
       groupClarify={groupClarify}
       groupNeedsYou={groupNeedsYou}
-      groupRooms={groupRooms}
       key={`group:${row.name}`}
       members={row.members}
       onDisband={setDeletingGroup}
       onNewSection={target => setSectionDialog({ group: target, mode: 'create' })}
       onOpen={group => openGroupChat(group, 'name')}
-      sortedGroupRows={sortedGroupRows}
     />
   )
 
-  const { renderUserSections, renderGatewaySection, renderGroupChatSection, renderHiddenGatewaySection } =
+  const renderCanonicalGroupRow = (row: RosterCanonicalGroupRow) => (
+    <CanonicalGroupRow
+      active={groupChatName === row.entry.key}
+      entry={row.entry}
+      key={row.entry.key}
+      members={row.members}
+      onOpen={key => openGroupChat(key, 'key')}
+    />
+  )
+
+  const { renderUserSections, renderGatewaySection, renderHiddenGatewaySection } =
     rosterSectionRenderers({
       b,
       userSections,
@@ -466,12 +476,11 @@ export function BotsPane() {
       setSectionDialog,
       renderBotRow,
       renderGroupRow,
-      sortedGroupRows
+      renderCanonicalGroupRow
     })
 
   return (
     <div className="flex h-full flex-col">
-      <CanonicalGroupList onOpen={openGroupChat} />
       {renderRosterToolbar({
         b,
         activityToasts,
@@ -510,7 +519,6 @@ export function BotsPane() {
         query,
         selectedGateway,
         showGatewaySections,
-        sortedGroupRows,
         gatewaySections,
         showHiddenSection,
         hiddenSectionRef,
@@ -519,7 +527,6 @@ export function BotsPane() {
         showHiddenRows,
         hiddenGatewaySections,
         renderBotRow,
-        renderGroupChatSection,
         renderGatewaySection,
         renderUserSections,
         renderHiddenGatewaySection

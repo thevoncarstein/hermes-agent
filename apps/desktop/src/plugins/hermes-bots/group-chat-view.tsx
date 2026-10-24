@@ -51,6 +51,7 @@ import {
   registerCanonicalGroup,
   resolveCanonicalGroup
 } from './canonical-group-registry'
+import { refreshCanonicalRosterRooms } from './canonical-group-roster'
 import { CanonicalGroupWorkspace } from './canonical-group-workspace'
 import { canonicalGroupRequest, createCanonicalGroup } from './canonical-groups'
 import {
@@ -690,6 +691,8 @@ function GroupExecutionGate(props: GroupChatWorkspaceProps) {
       setBusy(true)
       void createCanonicalGroup(route, props.group, props.members)
         .then(({ room }) => {
+          refreshCanonicalRosterRooms()
+
           if (sourceCurrent()) {openGroupChat(registerCanonicalGroup(route, room), 'key')}
         })
         .catch(e => { if (sourceCurrent()) {setError(String(e))} }).finally(() => setBusy(false))

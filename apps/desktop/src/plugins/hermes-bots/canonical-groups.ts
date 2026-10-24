@@ -25,6 +25,9 @@ export interface CanonicalRoom {
   name: string
   members: CanonicalRoomMember[]
   disbanded_at?: number | null
+  /** Unix seconds; `groups.list` orders by it. */
+  updated_at?: number
+  latest_seq?: number | null
 }
 
 export interface CanonicalPendingAction {

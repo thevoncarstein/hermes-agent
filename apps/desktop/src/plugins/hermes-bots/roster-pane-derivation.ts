@@ -1,3 +1,4 @@
+import type { CanonicalRosterRoom } from './canonical-group-roster'
 import { botActivitySession } from './data'
 import { botRosterKey, filterBots, preferReachableSameNameRows } from './data'
 import type { $groupChats } from './group-chat'
@@ -27,6 +28,48 @@ export interface RosterGroupRow {
   name: string
   pinned: boolean
 }
+/** A gateway-hosted room. It has no local room record, so it is never pinned,
+ *  ordered or filed into a section: it sits in the list by recency. */
+export interface RosterCanonicalGroupRow {
+  active: boolean
+  activity: number
+  entry: CanonicalRosterRoom
+  kind: 'canonical'
+  members: GroupMember[]
+  name: string
+  pinned: false
+}
+
+/** A hosted room's members as roster bots, so the row can draw their faces.
+ *  A member the roster does not list keeps the identity the room recorded. */
+export function canonicalRoomMembers(entry: CanonicalRosterRoom, roster: RosterRow[]): GroupMember[] {
+  const connectionId = entry.route.connectionId
+
+  return entry.room.members.map(
+    member =>
+      roster.find(bot => bot.name === member.profile && String(bot.connectionId || '') === connectionId) ||
+      roster.find(bot => bot.name === member.profile) || {
+        connectionId,
+        display_name: member.display_name,
+        handle: member.handle,
+        name: member.profile
+      }
+  )
+}
+
+function canonicalRoomMatches(row: RosterCanonicalGroupRow, query: string, gatewayFilter: string) {
+  if (gatewayFilter && gatewayFilter !== 'all' && row.entry.route.connectionId !== gatewayFilter) {
+    return false
+  }
+
+  const needle = query.trim().toLowerCase().replace(/^@/, '')
+
+  return (
+    !needle ||
+    [row.name, ...row.entry.room.members.flatMap(member => [member.handle, member.profile, member.display_name || ''])]
+      .some(text => text.toLowerCase().includes(needle))
+  )
+}
 
 interface RosterRowsInput {
   roster: RosterRow[]
@@ -36,6 +79,7 @@ interface RosterRowsInput {
   activityFilter: RosterActivityFilter
   rowKindFilter: RosterKindFilter
   groupRooms: ReturnType<typeof $groupChats.get>
+  canonicalRooms: CanonicalRosterRoom[]
   activeRosterKeys: Set<string>
   gatewayOptions: ReturnType<typeof rosterGatewayOptions>
   activityOf: (bot: RosterRow) => number
@@ -50,6 +94,7 @@ export function deriveRosterRows({
   activityFilter,
   rowKindFilter,
   groupRooms,
+  canonicalRooms,
   activeRosterKeys,
   gatewayOptions,
   activityOf,
@@ -105,6 +150,30 @@ export function deriveRosterRows({
     }))
     .filter(row => rowKindFilter !== 'bots' && rosterActivityMatches(row, activityFilter))
 
+  const canonicalRows = canonicalRooms
+    .map((entry): RosterCanonicalGroupRow => {
+      const members = canonicalRoomMembers(entry, roster)
+      const activity = entry.last?.at || (entry.room.updated_at ?? 0) * 1000
+
+      return {
+        kind: 'canonical',
+        entry,
+        name: entry.room.name,
+        members,
+        pinned: false,
+        activity,
+        active:
+          Boolean(activity && Date.now() - activity <= ACTIVE_WINDOW_S * 1000) ||
+          members.some(member => activeRosterKeys.has(botRosterKey(member)))
+      }
+    })
+    .filter(
+      row =>
+        rowKindFilter !== 'bots' &&
+        canonicalRoomMatches(row, query, gatewayFilter) &&
+        rosterActivityMatches(row, activityFilter)
+    )
+
   const botRows =
     rowKindFilter === 'groups'
       ? []
@@ -116,19 +185,24 @@ export function deriveRosterRows({
           active: activeRosterKeys.has(botRosterKey(bot))
         }))
 
-  const rosterRows = sortGroupRosterRows([...botRows, ...groupRows], groupRooms)
-  const sortedGroupRows = sortGroupRosterRows(groupRows, groupRooms)
+  const rosterRows = sortGroupRosterRows([...botRows, ...groupRows, ...canonicalRows], groupRooms)
   const gatewaySections = rosterGatewaySections(botRows, gatewayOptions, gatewayFilter)
-  const showGatewaySections = gatewaySections.sectioned && botRows.length > 0
+
+  // Gateway headings only while the list is bots alone. A group can seat bots
+  // from several gateways, so with groups present the roster is one flat list
+  // where groups and bots sort together, as in any chat app's conversation list.
+  const showGatewaySections =
+    gatewaySections.sectioned && botRows.length > 0 && groupRows.length === 0 && canonicalRows.length === 0
 
   return {
     activeSourceRoster,
     hiddenBots,
     visibleRoster,
     filteredHiddenBots,
-    groupNames,
+    // Every group the roster can list, local or hosted: what the presentation
+    // counts toward search, filters and the "all bots hidden" notice.
+    groupNames: [...groupNames, ...canonicalRooms.map(entry => entry.room.name)],
     rosterRows,
-    sortedGroupRows,
     gatewaySections,
     showGatewaySections
   }

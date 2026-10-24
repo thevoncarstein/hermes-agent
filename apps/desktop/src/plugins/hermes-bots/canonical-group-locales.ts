@@ -8,7 +8,6 @@ export interface CanonicalGroupMessages {
   turnCancelled: string
   turnDeferred: string
   memberUnavailable: string
-  refreshGroups: string
   loadingGroup: string
   loadingGroups: string
   emptyGroups: string
@@ -41,7 +40,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'Turn deferred',
     memberUnavailable: 'Member unavailable',
     members: 'Members',
-    refreshGroups: 'Refresh gateway groups',
     loadingGroup: 'Loading group…',
     loadingGroups: 'Loading gateway groups…',
     emptyGroups: 'No gateway groups found.',
@@ -72,7 +70,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'ターンが延期されました',
     memberUnavailable: 'メンバーは利用できません',
     members: 'メンバー',
-    refreshGroups: 'ゲートウェイのグループを更新',
     loadingGroup: 'グループを読み込み中…',
     loadingGroups: 'ゲートウェイのグループを読み込み中…',
     emptyGroups: 'ゲートウェイのグループが見つかりません。',
@@ -103,7 +100,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: '回合已推迟',
     memberUnavailable: '成员不可用',
     members: '成员',
-    refreshGroups: '刷新网关群组',
     loadingGroup: '正在加载群组…',
     loadingGroups: '正在加载网关群组…',
     emptyGroups: '未找到网关群组。',
@@ -134,7 +130,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: '回合已延後',
     memberUnavailable: '成員無法使用',
     members: '成員',
-    refreshGroups: '重新整理閘道群組',
     loadingGroup: '正在載入群組…',
     loadingGroups: '正在載入閘道群組…',
     emptyGroups: '找不到閘道群組。',
@@ -165,7 +160,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'أُجّلت الجولة',
     memberUnavailable: 'العضو غير متاح',
     members: 'الأعضاء',
-    refreshGroups: 'تحديث مجموعات البوابة',
     loadingGroup: 'جارٍ تحميل المجموعة…',
     loadingGroups: 'جارٍ تحميل مجموعات البوابة…',
     emptyGroups: 'لم يتم العثور على مجموعات في البوابة.',
@@ -196,7 +190,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'Ход отложен',
     memberUnavailable: 'Участник недоступен',
     members: 'Участники',
-    refreshGroups: 'Обновить группы шлюза',
     loadingGroup: 'Загрузка группы…',
     loadingGroups: 'Загрузка групп шлюза…',
     emptyGroups: 'Группы шлюза не найдены.',
@@ -230,7 +223,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'Tour différé',
     memberUnavailable: 'Membre indisponible',
     members: 'Membres',
-    refreshGroups: 'Actualiser les groupes de la passerelle',
     loadingGroup: 'Chargement du groupe…',
     loadingGroups: 'Chargement des groupes de la passerelle…',
     emptyGroups: 'Aucun groupe de passerelle trouvé.',
@@ -263,7 +255,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'Zug verschoben',
     memberUnavailable: 'Mitglied nicht verfügbar',
     members: 'Mitglieder',
-    refreshGroups: 'Gateway-Gruppen aktualisieren',
     loadingGroup: 'Gruppe wird geladen…',
     loadingGroups: 'Gateway-Gruppen werden geladen…',
     emptyGroups: 'Keine Gateway-Gruppen gefunden.',
@@ -297,7 +288,6 @@ export const CANONICAL_GROUP_LOCALES = {
     turnDeferred: 'Turno aplazado',
     memberUnavailable: 'Miembro no disponible',
     members: 'Miembros',
-    refreshGroups: 'Actualizar grupos de la pasarela',
     loadingGroup: 'Cargando grupo…',
     loadingGroups: 'Cargando grupos de la pasarela…',
     emptyGroups: 'No se encontraron grupos de la pasarela.',

@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 
 import { botRosterKey } from './data'
 import type { useBots } from './i18n'
-import type { RosterGroupRow } from './roster-pane-derivation'
-import { GatewayKindGlyph, GatewaySectionHeading, RosterSectionHeader } from './roster-sections'
+import type { RosterCanonicalGroupRow, RosterGroupRow } from './roster-pane-derivation'
+import { GatewayKindGlyph, GatewaySectionHeading } from './roster-sections'
 import type { ResolvedRosterGatewaySection } from './roster-sections'
 import type { BotMeta, GroupChat, GroupMember, RosterRow } from './types'
 import type { $botSections, SectionDialogState } from './user-sections'
@@ -32,7 +32,7 @@ interface RosterSectionRenderersProps {
   setSectionDialog: (value: SectionDialogState) => void
   renderBotRow: (bot: RosterRow, keyPrefix?: string) => ReactNode
   renderGroupRow: (row: { members: GroupMember[]; name: string }) => ReactNode
-  sortedGroupRows: RosterGroupRow[]
+  renderCanonicalGroupRow: (row: RosterCanonicalGroupRow) => ReactNode
 }
 
 export function rosterSectionRenderers({
@@ -47,7 +47,7 @@ export function rosterSectionRenderers({
   setSectionDialog,
   renderBotRow,
   renderGroupRow,
-  sortedGroupRows
+  renderCanonicalGroupRow
 }: RosterSectionRenderersProps) {
   const removeSection = (id: string) => {
     const name = userSections.find(section => section.id === id)?.name || ''
@@ -70,12 +70,22 @@ export function rosterSectionRenderers({
   // gateway); user sections group the rows INSIDE each connection bucket,
   // indented under it, and group the flat list when there is only one.
   // `keyPrefix` keeps row keys unique across the gateway buckets.
-  type UserSectionRow = { bot: RosterRow; kind?: 'bot' } | RosterGroupRow
+  type UserSectionRow = { bot: RosterRow; kind?: 'bot' } | RosterCanonicalGroupRow | RosterGroupRow
+
+  const renderRow = (row: UserSectionRow, keyPrefix: string) =>
+    row.kind === 'group'
+      ? renderGroupRow(row)
+      : row.kind === 'canonical'
+        ? renderCanonicalGroupRow(row)
+        : renderBotRow(row.bot, keyPrefix)
+
+  const dragKeyOf = (row: UserSectionRow) =>
+    row.kind === 'group' ? groupDragKey(row.name) : row.kind === 'canonical' ? null : botRosterKey(row.bot)
 
   const renderUserSections = (rows: UserSectionRow[], keyPrefix = '') => {
     // No sections made: the plain list, exactly as before this feature.
     if (!userSections.length) {
-      return rows.map(row => (row.kind === 'group' ? renderGroupRow(row) : renderBotRow(row.bot, keyPrefix)))
+      return rows.map(row => renderRow(row, keyPrefix))
     }
 
     const nested = Boolean(keyPrefix)
@@ -99,9 +109,7 @@ export function rosterSectionRenderers({
             <SectionDropZone
               isSource={
                 Boolean(dragging) &&
-                block.rows.some(row =>
-                  row.kind === 'group' ? groupDragKey(row.name) === dragging : botRosterKey(row.bot) === dragging
-                )
+                block.rows.some(row => dragKeyOf(row) === dragging)
               }
               key={key}
               nested={nested}
@@ -135,9 +143,7 @@ export function rosterSectionRenderers({
               />
               {collapsed ? null : block.rows.length ? (
                 <div className="grid min-w-0 gap-0.5">
-                  {block.rows.map(row =>
-                    row.kind === 'group' ? renderGroupRow(row) : renderBotRow(row.bot, `${key}:`)
-                  )}
+                  {block.rows.map(row => renderRow(row, `${key}:`))}
                 </div>
               ) : (
                 // Empty section: a quiet dashed slot that says what it is for,
@@ -171,27 +177,6 @@ export function rosterSectionRenderers({
     )
   }
 
-  const renderGroupChatSection = () => {
-    const sectionId = 'group-chats'
-    const collapsed = rosterSectionCollapsed(sectionId)
-
-    return (
-      <div className="min-w-0" key={sectionId}>
-        <RosterSectionHeader
-          collapsed={collapsed}
-          count={sortedGroupRows.length}
-          icon="organization"
-          label={b.roster.groupChats}
-          onToggle={() => toggleRosterSection(sectionId)}
-          tip={`${sortedGroupRows.length} global group chat${sortedGroupRows.length === 1 ? '' : 's'}`}
-        />
-        {collapsed ? null : (
-          <div className="grid min-w-0 gap-0.5">{renderUserSections(sortedGroupRows, 'groups:')}</div>
-        )}
-      </div>
-    )
-  }
-
   const renderHiddenGatewaySection = (section: ResolvedRosterGatewaySection) => (
     <div className="min-w-0" key={`hidden-gateway:${section.id}`}>
       <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wider text-(--ui-text-quaternary)">
@@ -205,5 +190,5 @@ export function rosterSectionRenderers({
     </div>
   )
 
-  return { renderUserSections, renderGatewaySection, renderGroupChatSection, renderHiddenGatewaySection }
+  return { renderUserSections, renderGatewaySection, renderHiddenGatewaySection }
 }

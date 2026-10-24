@@ -8,7 +8,6 @@
 
 import {
   cn,
-  coarseElapsed,
   Codicon,
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -61,6 +60,7 @@ import { $groupChats, $groupChatWorkspace } from './group-chat'
 import { botGroups, groupLastActivity } from './group-membership'
 import { toggleGroupChatPinned } from './group-pin'
 import { $activeGroupMemberKeys } from './group-presence'
+import { GroupRowShell } from './group-row-shell'
 import { fallbackSelectionAfterHide, isBotHidden, isBotPinned } from './hidden-bots'
 import { useBots } from './i18n'
 import { displayName, stripPreviewMarkdown } from './labels'
@@ -74,11 +74,12 @@ import {
   botRowOwnsWorkspace,
   botWorkingMood,
   previewKind,
+  rowAge,
   useTurnBusy,
   workerActiveAt
 } from './row-helpers'
 import { openBotScreen } from './screen-open'
-import type { GroupMember, RosterRow, SidebarRowLabels } from './types'
+import type { GroupMember, RosterRow } from './types'
 import {
   $botSections,
   $draggingBot,
@@ -91,17 +92,6 @@ import {
 } from './user-sections'
 
 // ── bot row ──────────────────────────────────────────────────────────────────
-
-/** Row age in the sidebar's compact form ("now", "52m", "3h", "18d").
- *  Deliberately the same `coarseElapsed` + suffix pair the session rows
- *  directly above use, so the two lists in one rail don't disagree about how
- *  an age is spelled. Not `relativeTime` — that's the bidirectional Intl form
- *  ("in 14 hr"), which belongs on a scheduled next-run. */
-function rowAge(ms: number, r: SidebarRowLabels): string {
-  const { unit, value } = coarseElapsed(Date.now() - ms)
-
-  return unit === 'second' ? r.ageNow : `${value}${unit === 'day' ? r.ageDay : unit === 'hour' ? r.ageHour : r.ageMin}`
-}
 
 interface BotRowProps {
   bot: RosterRow
@@ -513,7 +503,6 @@ interface GroupRowProps {
 }
 
 export function GroupRow({ active, group, members, needsYou, onOpen, onDisband, onNewSection }: GroupRowProps) {
-  const { t } = useI18n()
   const b = useBots()
   const rooms = useValue($groupChats)
   const sections = useValue($botSections)
@@ -548,15 +537,17 @@ export function GroupRow({ active, group, members, needsYou, onOpen, onDisband, 
   const dragging = useValue($draggingBot) === dragKey
 
   const row = (
-    <RowButton
+    <GroupRowShell
+      active={active}
       aria-label={`${group}, ${b.group.memberCount(members.length)}, ${availabilityLabel}`}
-      className={cn(
-        'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-md px-2 py-2 text-left transition-colors',
-        'hover:bg-(--chrome-action-hover)',
-        active && 'bg-(--ui-row-active-background)',
-        dragging && 'opacity-40'
-      )}
+      availabilityLabel={availabilityLabel}
+      availableMembers={availableMembers}
       draggable
+      dragging={dragging}
+      image={room.image}
+      lastAt={lastAt}
+      members={members}
+      needsYou={needsYou}
       onClick={() => {
         haptic('tap')
         onOpen(group)
@@ -567,60 +558,10 @@ export function GroupRow({ active, group, members, needsYou, onOpen, onDisband, 
         event.dataTransfer.effectAllowed = 'move'
         $draggingBot.set(dragKey)
       }}
-    >
-      <div className="relative flex w-[34px] shrink-0 items-center justify-center">
-        {room.image ? (
-          <img
-            alt=""
-            className={cn(
-              'size-8 rounded-md object-cover ring-1 ring-(--ui-stroke-tertiary)',
-              availableMembers === 0 && 'grayscale opacity-60'
-            )}
-            src={room.image}
-          />
-        ) : (
-          <span
-            className={cn(
-              'flex size-8 items-center justify-center rounded-md bg-(--chrome-action-hover) text-(--ui-text-tertiary)',
-              availableMembers === 0 && 'opacity-60'
-            )}
-          >
-            <Codicon name="organization" />
-          </span>
-        )}
-        {members.length > 0 && availableMembers < members.length ? (
-          <Tip label={availabilityLabel}>
-            <span
-              aria-label={availabilityLabel}
-              className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-(--ui-bg-primary) text-[0.625rem] text-amber-600 ring-1 ring-(--ui-stroke-tertiary) dark:text-amber-300"
-            >
-              <Codicon name="debug-disconnect" />
-            </span>
-          </Tip>
-        ) : null}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium">{group}</span>
-          {room.pinned ? (
-            <Tip label={b.roster.pinned}>
-              <Codicon className="shrink-0 text-[0.6875rem] text-(--ui-text-quaternary)" name="pinned" />
-            </Tip>
-          ) : null}
-          {needsYou ? (
-            <Tip label={b.group.needsYourInput}>
-              <Codicon aria-label={b.roster.needsInput} className="shrink-0 text-(--ui-accent)" name="question" />
-            </Tip>
-          ) : null}
-          {lastAt ? (
-            <span className="shrink-0 text-[0.6875rem] text-(--ui-text-quaternary)">
-              {rowAge(lastAt, t.sidebar.row)}
-            </span>
-          ) : null}
-        </div>
-        <div className="min-w-0 truncate text-xs text-(--ui-text-tertiary)">{preview}</div>
-      </div>
-    </RowButton>
+      pinned={room.pinned}
+      preview={preview}
+      title={group}
+    />
   )
 
   return (

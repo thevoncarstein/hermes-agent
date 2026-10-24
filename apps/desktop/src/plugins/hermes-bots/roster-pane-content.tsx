@@ -25,7 +25,6 @@ interface RosterContentProps {
   query: string
   selectedGateway: ReturnType<typeof rosterGatewayOptions>[number] | undefined
   showGatewaySections: boolean
-  sortedGroupRows: ReturnType<typeof deriveRosterRows>['sortedGroupRows']
   gatewaySections: ReturnType<typeof deriveRosterRows>['gatewaySections']
   showHiddenSection: boolean
   hiddenSectionRef: RefObject<HTMLDivElement | null>
@@ -34,7 +33,6 @@ interface RosterContentProps {
   showHiddenRows: boolean
   hiddenGatewaySections: ReturnType<typeof deriveRosterPresentation>['hiddenGatewaySections']
   renderBotRow: (bot: RosterRow, keyPrefix?: string) => ReactNode
-  renderGroupChatSection: ReturnType<typeof rosterSectionRenderers>['renderGroupChatSection']
   renderGatewaySection: ReturnType<typeof rosterSectionRenderers>['renderGatewaySection']
   renderUserSections: ReturnType<typeof rosterSectionRenderers>['renderUserSections']
   renderHiddenGatewaySection: ReturnType<typeof rosterSectionRenderers>['renderHiddenGatewaySection']
@@ -56,7 +54,6 @@ export function renderRosterContent({
   query,
   selectedGateway,
   showGatewaySections,
-  sortedGroupRows,
   gatewaySections,
   showHiddenSection,
   hiddenSectionRef,
@@ -65,7 +62,6 @@ export function renderRosterContent({
   showHiddenRows,
   hiddenGatewaySections,
   renderBotRow,
-  renderGroupChatSection,
   renderGatewaySection,
   renderUserSections,
   renderHiddenGatewaySection
@@ -129,10 +125,7 @@ export function renderRosterContent({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-slot="bots-roster">
           <div className="grid w-full min-w-0 gap-0.5 px-1.5 pb-2">
             {showGatewaySections
-              ? [
-                  sortedGroupRows.length ? renderGroupChatSection() : null,
-                  ...gatewaySections.sections.map(renderGatewaySection)
-                ].filter(Boolean)
+              ? gatewaySections.sections.map(renderGatewaySection)
               : renderUserSections(rosterRows)}
             {showHiddenSection ? (
               <div

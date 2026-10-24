@@ -78,7 +78,6 @@ export type BotsMessages = {
     search: string
     searchPlaceholder: string
     newBotOrGroup: string
-    groupChats: string
     emptyTitle: string
     emptyDesc: string
     noMatchQuery: (query: string) => string
