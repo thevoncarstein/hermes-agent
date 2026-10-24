@@ -433,6 +433,21 @@ it.each([
   expect(setGroupCreateOpen).toHaveBeenCalledTimes(disabled ? 0 : 1)
 })
 
+// The dialog stays mounted while closed. An activation that leaves connection,
+// profile and socket state unchanged (boot re-activating the primary) bumps the
+// epoch without a re-render; the next open must still accept the authority's answer.
+it('enables Create after a same-route activation that happened while the dialog was closed', async () => {
+  answer({ driver: true, persistent_process: true })
+  const { rerender } = render(<CreateGroupChatDialog onClose={vi.fn()} open={false} roster={roster} />)
+  activation.epoch++
+  rerender(<CreateGroupChatDialog onClose={vi.fn()} open roster={roster} />)
+  await waitFor(() => expect(request.mock.calls.map(call => call[1])).toContain('groups.capabilities'))
+
+  for (const checkbox of screen.getAllByRole('checkbox').slice(0, 2)) {fireEvent.click(checkbox)}
+  const submit = screen.getByRole('button', { name: 'Create Group (2)' }) as HTMLButtonElement
+  await waitFor(() => expect(submit.disabled).toBe(false))
+})
+
 it('offers the project folder while the driver check is still pending', async () => {
   request.mockImplementation(() => new Promise(() => undefined))
   render(<CreateGroupChatDialog onClose={vi.fn()} open roster={roster} />)

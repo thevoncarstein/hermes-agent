@@ -73,8 +73,7 @@ export function useGroupCapability(active: boolean) {
   const connectionId = useValue(host.state.connectionId)
   const profile = useValue(host.state.profile)
   const gateway = useValue(host.state.gateway)
-  const activationEpoch = gatewayActivationEpoch()
-  const source = JSON.stringify([connectionId, profile, gateway, activationEpoch])
+  const source = JSON.stringify([connectionId, profile, gateway])
   const [capability, setCapability] = useState<GroupCapabilityState | null>(null)
 
   useEffect(() => {
@@ -85,6 +84,10 @@ export function useGroupCapability(active: boolean) {
       return
     }
 
+    // Read when the check starts, never in render: the epoch is not reactive, so
+    // React Compiler keeps a render-time read until a route atom changes, and a
+    // same-route activation since then fenced out every answer (Create never woke).
+    const activationEpoch = gatewayActivationEpoch()
     const route = { connectionId, profile }
     const sourceCurrent = groupCreationSource(route, activationEpoch)
 
@@ -105,7 +108,7 @@ export function useGroupCapability(active: boolean) {
     )
 
     return () => { cancelled = true }
-  }, [activationEpoch, active, connectionId, gateway, profile, source])
+  }, [active, connectionId, gateway, profile, source])
 
   const current = capability?.source === source ? capability : null
 
