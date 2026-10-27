@@ -294,7 +294,13 @@ export function fixedTrackSize(node: LayoutNode, axis: 'row' | 'column', ctx: Tr
   }
 
   // Across the axis a flex child just stretches; the fixed ones set the size.
-  return cssMax(sizes) ?? null
+  // A zone minimized ALONG this split is a rail that stretches across it, so its
+  // strip size only counts once every sibling is minimized too (the row folds to
+  // a strip). Otherwise hiding the sidebar in a top row [sessions | chat] set the
+  // whole row — the chat with it — to the 28px strip height.
+  const open = visible.filter(child => !(child.type === 'group' && child.minimized))
+
+  return cssMax(open.length > 0 ? open.map(child => fixedTrackSize(child, axis, ctx)) : sizes) ?? null
 }
 
 /**
