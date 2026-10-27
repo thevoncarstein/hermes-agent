@@ -4421,6 +4421,9 @@ export const en: Translations = {
       copyUrl: 'Copy URL',
       copyResolvedUrl: 'Copy resolved URL'
     },
+    path: {
+      open: 'Open'
+    },
     image: {
       copyImage: 'Copy image',
       copyImageAddress: 'Copy image address',

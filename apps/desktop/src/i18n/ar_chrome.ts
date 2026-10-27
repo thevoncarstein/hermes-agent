@@ -572,6 +572,9 @@ export const arChrome = {
       copyUrl: 'نسخ الرابط',
       copyResolvedUrl: 'نسخ الرابط المُحلَّل'
     },
+    path: {
+      open: 'فتح'
+    },
     image: {
       copyImage: 'نسخ الصورة',
       copyImageAddress: 'نسخ عنوان الصورة',

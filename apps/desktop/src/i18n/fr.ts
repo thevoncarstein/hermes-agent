@@ -4852,6 +4852,9 @@ export const frOverrides = {
       copyUrl: "Copier l'URL",
       copyResolvedUrl: "Copier l'URL résolue"
     },
+    path: {
+      open: 'Ouvrir'
+    },
     image: {
       copyImage: "Copier l'image",
       copyImageAddress: "Copier l'adresse de l'image",

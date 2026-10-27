@@ -3878,6 +3878,9 @@ catalog: CatalogTranslations
       copyUrl: string
       copyResolvedUrl: string
     }
+    path: {
+      open: string
+    }
     image: {
       copyImage: string
       copyImageAddress: string

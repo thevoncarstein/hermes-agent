@@ -3521,6 +3521,9 @@ export const ruOverrides = {
       copyUrl: 'Копировать URL',
       copyResolvedUrl: 'Копировать разрешённый URL'
     },
+    path: {
+      open: 'Открыть'
+    },
     image: {
       copyImage: 'Копировать изображение',
       copyImageAddress: 'Копировать адрес изображения',

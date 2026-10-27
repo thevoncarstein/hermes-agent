@@ -8,7 +8,16 @@ import {
   tailBoundedRemend
 } from '@assistant-ui/react-streamdown'
 import type { code as streamdownCode } from '@streamdown/code'
-import { type ComponentProps, isValidElement, memo, type ReactNode, useEffect, useMemo, useState } from 'react'
+import {
+  type ComponentProps,
+  isValidElement,
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState
+} from 'react'
 import { defaultRemarkPlugins } from 'streamdown'
 
 import { ExpandableBlock } from '@/components/chat/expandable-block'
@@ -46,6 +55,7 @@ import { useForcedTextDirection } from '@/store/text-direction'
 import { ArtifactCard } from './artifact-card'
 import { SessionRefLink } from './directive-text'
 import { detectEmbed, extractAlert, MarkdownAlert, RichCodeBlock, UrlEmbed } from './embeds'
+import { linkedInlineCode, linkifyLocalPaths, LocalPathLink, looksLikeDirectoryPath } from './local-path-link'
 import { ResizableMarkdownTable, ResizableMarkdownTh } from './markdown-table'
 import { paragraphPlainText, TranscriptDirectiveLeaf, useResolvedParagraph } from './transcript-directive'
 
@@ -278,6 +288,15 @@ function flattenChildrenToText(node: unknown): string {
   return ''
 }
 
+function FileHrefLink({ children, href }: { children: ReactNode; href: string }) {
+  // A folder has nothing to preview: open it in the OS file manager.
+  if (!href.startsWith('file:') && looksLikeDirectoryPath(href)) {
+    return <LocalPathLink path={href}>{children}</LocalPathLink>
+  }
+
+  return mediaKind(href) === 'file' ? <PreviewAttachment target={href} /> : <MediaAttachment path={href} />
+}
+
 function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a'>) {
   const mediaPath = mediaPathFromMarkdownHref(href)
 
@@ -330,11 +349,7 @@ function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a
     const fileHref = href && !href.startsWith('#') && isFileMediaPath(href) ? href : null
 
     if (fileHref) {
-      return mediaKind(fileHref) === 'file' ? (
-        <PreviewAttachment target={fileHref} />
-      ) : (
-        <MediaAttachment path={fileHref} />
-      )
+      return <FileHrefLink href={fileHref}>{children}</FileHrefLink>
     }
 
     return (
@@ -634,6 +649,17 @@ function MarkdownTextSurface({
   const code = useCodePlugin()
   const plugins = useMemo(() => (code ? { math: mathPlugin, code } : { math: mathPlugin }), [code])
 
+  // Bare local paths in prose become links (previewOnly surfaces stay inert),
+  // then the caller's decoration (group @mentions) runs on what is left.
+  const decorate = useCallback(
+    (children: ReactNode) => {
+      const linked = previewOnly ? children : linkifyLocalPaths(children)
+
+      return decorateText ? decorateText(linked) : linked
+    },
+    [decorateText, previewOnly]
+  )
+
   const components = useMemo(
     () =>
       ({
@@ -651,10 +677,10 @@ function MarkdownTextSurface({
         ),
         p: ({ children, ...props }: ComponentProps<'p'>) =>
           previewOnly ? (
-            <p {...props}>{decorateText ? decorateText(children) : children}</p>
+            <p {...props}>{decorate(children)}</p>
           ) : (
             <MarkdownParagraph {...props} scratchpad={scratchpad} streaming={isStreaming}>
-              {decorateText ? decorateText(children) : children}
+              {decorate(children)}
             </MarkdownParagraph>
           ),
         a: previewOnly ? ({ children }: ComponentProps<'a'>) => <span>{children}</span> : MarkdownLink,
@@ -663,9 +689,11 @@ function MarkdownTextSurface({
         // mirroring the CSS isolate that already keeps it out of the
         // plaintext scan. Fenced code never reaches this override; it goes
         // through the code plugin's CodeCard path.
-        inlineCode: ({ className, ...props }: ComponentProps<'code'>) => (
-          <code className={className} dir="ltr" {...props} />
-        ),
+        inlineCode: ({ className, ...props }: ComponentProps<'code'>) => {
+          const code = <code className={className} dir="ltr" {...props} />
+
+          return (previewOnly ? null : linkedInlineCode(childrenToText(props.children), code)) ?? code
+        },
         // `---` as quiet spacing, not a heavy full-width rule.
         hr: (_props: ComponentProps<'hr'>) => <div aria-hidden className="my-3" />,
         // Lists and blockquotes have chrome that sits *beside* the text
@@ -704,7 +732,7 @@ function MarkdownTextSurface({
         ),
         li: ({ children, className, ...props }: ComponentProps<'li'>) => (
           <li className={cn('leading-(--dt-line-height)', className)} {...props}>
-            {decorateText ? decorateText(children) : children}
+            {decorate(children)}
           </li>
         ),
         // Columns are drag-resizable; the widths live outside the transcript
@@ -723,7 +751,7 @@ function MarkdownTextSurface({
             )}
             {...props}
           >
-            {decorateText ? decorateText(children) : children}
+            {decorate(children)}
           </td>
         ),
         img: previewOnly ? ({ alt }: ComponentProps<'img'>) => <span>{alt}</span> : MarkdownImage,
@@ -749,7 +777,7 @@ function MarkdownTextSurface({
           )
         }
       }) as StreamdownTextComponents,
-    [boxDir, decorateText, disableArtifacts, isStreaming, previewOnly, scratchpad]
+    [boxDir, decorate, disableArtifacts, isStreaming, previewOnly, scratchpad]
   )
 
   if (text.length > MAX_MARKDOWN_CHARS) {

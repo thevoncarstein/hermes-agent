@@ -4259,6 +4259,9 @@ export const zhOverrides = {
       copyUrl: '复制 URL',
       copyResolvedUrl: '复制解析后的 URL'
     },
+    path: {
+      open: '打开'
+    },
     image: {
       copyImage: '复制图片',
       copyImageAddress: '复制图片地址',

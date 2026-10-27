@@ -520,6 +520,9 @@ export const zhHantChrome = {
       copyUrl: '複製 URL',
       copyResolvedUrl: '複製解析後的 URL'
     },
+    path: {
+      open: '開啟'
+    },
     image: {
       copyImage: '複製圖片',
       copyImageAddress: '複製圖片位址',

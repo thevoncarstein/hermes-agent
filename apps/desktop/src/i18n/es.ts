@@ -4830,6 +4830,9 @@ export const esOverrides = {
       copyUrl: 'Copiar URL',
       copyResolvedUrl: 'Copiar URL resuelta'
     },
+    path: {
+      open: 'Abrir'
+    },
     image: {
       copyImage: 'Copiar imagen',
       copyImageAddress: 'Copiar dirección de imagen',
