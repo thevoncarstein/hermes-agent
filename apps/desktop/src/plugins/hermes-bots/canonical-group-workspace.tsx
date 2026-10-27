@@ -1,5 +1,5 @@
 import { Button, Textarea } from '@hermes/plugin-sdk'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { type CanonicalDriverActivity, CanonicalGroupRoster, CanonicalGroupWorkingLine, canonicalMemberPhases } from './canonical-group-activity'
 import { CanonicalGroupAttachments } from './canonical-group-attachments'
@@ -162,6 +162,22 @@ function CanonicalRoomView({ binding: initialBinding, visible, onDeleted }: {
   const act = (action: CanonicalPendingAction, choice?: 'once' | 'deny') =>
     mutate(() => actCanonicalGroup(binding, action, choice))
 
+  // Scroll anchoring, as in the local room (#89835): open at the latest message and
+  // follow new ones, unless the reader has scrolled up into history. Reopening a
+  // retained pane (hidden → visible) is an explicit open, so it re-anchors.
+  const logRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottom = useRef(true)
+
+  useLayoutEffect(() => {
+    if (visible) {stickToBottom.current = true}
+  }, [visible])
+
+  useLayoutEffect(() => {
+    const log = logRef.current
+
+    if (log && visible && stickToBottom.current) {log.scrollTop = log.scrollHeight}
+  }, [events.length, state?.driver_status, visible])
+
   const composerLocked = !restored || busy || !!pending
   const phases = canonicalMemberPhases(state?.driver_status)
 
@@ -176,7 +192,15 @@ function CanonicalRoomView({ binding: initialBinding, visible, onDeleted }: {
     {readError && <div role="alert">{readError}<Button onClick={() => void refresh().catch(e => setReadError(String(e)))}>{labels.refresh}</Button></div>}
     {error && <div role="alert">{error}</div>}
     {state && !state.driver_status && <p>{labels.driverUnavailable}</p>}
-    <div className="min-h-0 flex-1 overflow-auto" role="log">
+    <div
+      className="min-h-0 flex-1 overflow-auto"
+      onScroll={event => {
+        const log = event.currentTarget
+        stickToBottom.current = log.scrollHeight - log.scrollTop - log.clientHeight < 80
+      }}
+      ref={logRef}
+      role="log"
+    >
       <CanonicalGroupHistory binding={binding} disabled={!visible} events={events} members={state?.room.members} />
       <CanonicalGroupWorkingLine driver={state?.driver_status} labels={labels} members={state?.room.members} phases={phases} />
     </div>
@@ -193,9 +217,26 @@ function CanonicalRoomView({ binding: initialBinding, visible, onDeleted }: {
     </div>}
     {pending && <p role="status">{labels.restoredPendingSend}</p>}
     {context.chips(null)}
-    <form className="flex gap-2" onSubmit={event => { event.preventDefault(); send() }}>
+    {/* Same surface as the bot chat composer: one rounded field that grows from a single
+        line to --composer-input-max-height, with the controls inside it. */}
+    <form className="desktop-input-chrome flex items-end gap-(--composer-control-gap) rounded-2xl border px-(--composer-surface-pad-x) py-(--composer-surface-pad-y)" onSubmit={event => { event.preventDefault(); send() }}>
       <CanonicalGroupAttachments attachments={attachments} binding={binding} disabled={composerLocked} onAddFolder={() => context.addFolders(null)} onChange={setAttachments} onUploadingChange={setUploading} />
-      <Textarea aria-label={labels.groupMessage} className="min-w-0 flex-1" disabled={composerLocked} onChange={e => setDraft(e.target.value)} value={draft} />
+      <Textarea
+        aria-label={labels.groupMessage}
+        // The form carries the chrome; `.desktop-input-chrome` is unlayered, so only `!` beats it on the textarea.
+        className="field-sizing-content max-h-(--composer-input-max-height) min-h-(--composer-input-min-height) min-w-0 flex-1 resize-none overflow-y-auto border-0! bg-transparent! px-1 py-1 text-sm leading-normal shadow-none!"
+        disabled={composerLocked}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={event => {
+          // Enter sends, Shift+Enter keeps the native newline. Enter that confirms IME
+          // composition (isComposing, or keyCode 229 on macOS CJK IMEs) must not send.
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) {return}
+          event.preventDefault()
+          send()
+        }}
+        rows={1}
+        value={draft}
+      />
       <Button disabled={!restored || busy || uploading || (!pending && !draft.trim() && !attachments.length) || !state?.driver_status} type="submit">{pending ? labels.retry : labels.send}</Button>
     </form>
   </section>
