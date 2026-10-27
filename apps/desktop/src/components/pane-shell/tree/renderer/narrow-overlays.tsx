@@ -22,6 +22,7 @@ import { PANE_TOGGLE_REVEAL_EVENT } from '../..'
 import { useWindowControlsOverlap } from '../../geometry'
 import { NO_PANE_GROUP } from '../../pane-visibility'
 import { allPaneIds, findGroupOfPane, type LayoutNode } from '../model'
+import { $treePanePeek, useTreePanePeek } from '../peek'
 import { $hiddenTreePanes, $layoutTree, $narrowViewport } from '../store'
 
 import { KeepAlivePaneSlot, useStablePaneHosts } from './keep-alive-panes'
@@ -40,9 +41,31 @@ export function narrowOverlayWidth(ctx: TrackContext, tree: LayoutNode | null, r
   }
 
   const zone = findGroupOfPane(tree, revealed.id)
-  const track = zone ? fixedTrackSize(zone, 'row', ctx) : null
+  // Sized as the zone opens, never as its minimized rail (a peek of a sidebar
+  // the titlebar folded would otherwise be the rail's 28px).
+  const track = zone ? fixedTrackSize({ ...zone, minimized: false }, 'row', ctx) : null
 
   return track ?? paneChrome(revealed).width ?? '18rem'
+}
+
+/** The pane a reveal shows. A real pane id is that pane; an alias (the titlebar's
+ *  `chat-sidebar`) names the ZONE, so it shows the zone's front tab — Sessions
+ *  or Bots — exactly as docked. */
+export function resolveRevealedPane(
+  collapsibles: Contribution[],
+  tree: LayoutNode | null,
+  id: string
+): Contribution | undefined {
+  const direct = collapsibles.find(p => p.id === id)
+
+  if (direct) {
+    return direct
+  }
+
+  const aliased = collapsibles.find(p => paneChrome(p).revealAliases?.includes(id))
+  const zone = aliased && tree ? findGroupOfPane(tree, aliased.id) : null
+
+  return collapsibles.find(p => p.id === zone?.active) ?? aliased
 }
 
 export function NarrowOverlays() {
@@ -53,7 +76,13 @@ export function NarrowOverlays() {
   const paneStates = useStore($paneStates)
   const stableHosts = useStablePaneHosts()
   const hiddenPanes = useStore($hiddenTreePanes)
-  const [reveal, setReveal] = useState<{ id: string; pinned: boolean } | null>(null)
+  const [narrowReveal, setReveal] = useState<{ id: string; pinned: boolean } | null>(null)
+  // A wide-viewport peek borrows this overlay; the narrow reveal owns it otherwise.
+  const { peeking, reveal, selectTab, surfaceClass, topInset } = useTreePanePeek(
+    narrowReveal,
+    setReveal,
+    !narrow && !solo
+  )
 
   // The revealed overlay spans the full viewport height (inset-y-0 below), so
   // its tab strip starts at the top edge — under the native window controls
@@ -68,10 +97,17 @@ export function NarrowOverlays() {
     // hover boundary. Crossing between them must not dismiss an unpinned pane.
     const next = event.relatedTarget
 
-    if (next instanceof Element && next.closest('[data-narrow-overlay], [data-pane-overlay]')) {
+    // A menu the pane opened is portaled outside it; so is the peek's titlebar trigger.
+    if (
+      next instanceof Element &&
+      next.closest(
+        '[data-narrow-overlay], [data-pane-overlay], [data-radix-popper-content-wrapper], [data-pane-peek-trigger]'
+      )
+    ) {
       return
     }
 
+    $treePanePeek.set(null)
     setReveal(current => (current?.pinned ? current : null))
   }, [])
 
@@ -85,8 +121,12 @@ export function NarrowOverlays() {
   const collapsibles = useMemo(
     // Solo adopts sidebar panes without their surrounding sidebar chrome.
     // Suppress every reveal path while those panes are intentionally hidden.
-    () => (solo ? [] : panes.filter(p => paneChrome(p).collapsible && inTree.has(p.id) && !hiddenPanes.has(p.id))),
-    [solo, panes, inTree, hiddenPanes]
+    // A peek is of a pane the titlebar toggle hid, so it skips that filter.
+    () =>
+      solo
+        ? []
+        : panes.filter(p => paneChrome(p).collapsible && inTree.has(p.id) && (peeking || !hiddenPanes.has(p.id))),
+    [solo, panes, inTree, hiddenPanes, peeking]
   )
 
   const collapsiblesRef = useRef(collapsibles)
@@ -149,12 +189,12 @@ export function NarrowOverlays() {
     }
   }, [narrow, solo])
 
-  if (!narrow || solo || collapsibles.length === 0) {
+  if (!(narrow || peeking) || solo || collapsibles.length === 0) {
     return null
   }
 
   const sideOf = (c: Contribution) => (paneChrome(c).placement === 'left' ? 'left' : 'right')
-  const revealed = reveal ? collapsibles.find(p => p.id === reveal.id) : undefined
+  const revealed = reveal ? resolveRevealedPane(collapsibles, tree, reveal.id) : undefined
   const sides = [...new Set(collapsibles.map(sideOf))]
 
   // Size the overlay the way the pane's zone is sized while docked: declared
@@ -188,24 +228,26 @@ export function NarrowOverlays() {
   return (
     <>
       {/* Hover-intent strips on each edge that has a collapsed pane. */}
-      {sides.map(side => (
-        <div
-          className={cn('absolute inset-y-0 z-30 w-1.5', side === 'left' ? 'left-0' : 'right-0')}
-          key={side}
-          onMouseEnter={() => {
-            const first = collapsibles.find(p => sideOf(p) === side)
+      {narrow &&
+        sides.map(side => (
+          <div
+            className={cn('absolute inset-y-0 z-30 w-1.5', side === 'left' ? 'left-0' : 'right-0')}
+            key={side}
+            onMouseEnter={() => {
+              const first = collapsibles.find(p => sideOf(p) === side)
 
-            if (first) {
-              setReveal(current => (current?.pinned ? current : { id: first.id, pinned: false }))
-            }
-          }}
-        />
-      ))}
+              if (first) {
+                setReveal(current => (current?.pinned ? current : { id: first.id, pinned: false }))
+              }
+            }}
+          />
+        ))}
 
       {revealed && (
         <div
           className={cn(
-            'absolute inset-y-0 z-40 flex flex-col overflow-hidden bg-(--ui-sidebar-surface-background) shadow-2xl',
+            'inset-y-0 flex flex-col overflow-hidden bg-(--ui-sidebar-surface-background) shadow-2xl',
+            surfaceClass,
             sideOf(revealed) === 'left'
               ? 'left-0 border-r border-(--ui-stroke-secondary)'
               : 'right-0 border-l border-(--ui-stroke-secondary)'
@@ -223,7 +265,7 @@ export function NarrowOverlays() {
           // (macOS traffic lights); the spacer above keeps that band
           // draggable, mirroring TreeGroup's reservation.
           style={{
-            paddingTop: wcOverlap ? wcOverlap.y + wcOverlap.height : undefined,
+            paddingTop: Math.max(wcOverlap ? wcOverlap.y + wcOverlap.height : 0, topInset) || undefined,
             width: `min(${overlayWidth}, 85vw)`
           }}
         >
@@ -247,7 +289,8 @@ export function NarrowOverlays() {
                   onPointerDown={event => {
                     if (event.button === 0) {
                       event.preventDefault()
-                      setReveal(current => ({ id: pane.id, pinned: current?.pinned ?? false }))
+
+                      selectTab(pane.id)
                     }
                   }}
                 >

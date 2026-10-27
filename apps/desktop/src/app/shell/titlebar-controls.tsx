@@ -9,6 +9,7 @@ import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
+import type { TooltipPlacement } from '@/components/ui/tooltip-placement'
 import { Slot } from '@/contrib/react/slot'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { useI18n } from '@/i18n'
@@ -31,6 +32,7 @@ import { $titlebarAppActionsSide, TITLEBAR_FIXED_TOOLS } from '@/store/titlebar-
 
 import { appViewForPath, hidesFixedTitlebarClusters, isOverlayView } from '../routes'
 
+import { SidebarPeek } from './sidebar-peek'
 import {
   TITLEBAR_CHROME_CHANGED_EVENT,
   TITLEBAR_ICON_BADGE_SCALE,
@@ -52,6 +54,8 @@ export interface TitlebarTool extends Tiered {
   onSelect?: (event?: MouseEvent) => void
   /** Keybind action id — when set, the tooltip shows the label + keybind hint. */
   actionId?: string
+  /** Tooltip side; titlebar tools drop theirs below by default. */
+  tipPlacement?: TooltipPlacement
   /** Overlay count on the glyph (unread sessions). Hidden when 0/undefined. */
   badge?: number
   title?: string
@@ -179,7 +183,10 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     onSelect: () => {
       triggerHaptic('tap')
       leftEdge.toggle()
-    }
+    },
+    // While hover can peek the sidebar, its tab strip opens right below this
+    // button: put the tip beside the button, in the titlebar band, not over it.
+    tipPlacement: !leftEdge.open && !panesFlipped ? 'row' : undefined
   }
 
   const flipTool: TitlebarTool = {
@@ -318,9 +325,17 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   return (
     <>
       <div aria-label={t.shell.windowControls} className={leftClusterClass} data-titlebar-cluster="left">
-        {visibleLeftTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
+        {visibleLeftTools.map(tool =>
+          tool.id === sidebarTool.id ? (
+            // Only the sessions sidebar has chats to peek at: when panes are
+            // flipped this button toggles the other column.
+            <SidebarPeek enabled={!leftEdge.open && !panesFlipped} key={tool.id}>
+              <TitlebarToolButton navigate={navigate} tool={tool} />
+            </SidebarPeek>
+          ) : (
+            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+          )
+        )}
         <Slot area="titleBar.left" />
         <Slot area="titleBar.center" />
       </div>
@@ -370,7 +385,7 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
 
   if (tool.href) {
     return (
-      <Tip label={tooltipLabel} placement="toolbar">
+      <Tip label={tooltipLabel} placement={tool.tipPlacement ?? 'toolbar'}>
         <Button asChild className={className} size="icon-titlebar" variant="ghost">
           <a
             aria-label={tool.label}
@@ -388,7 +403,7 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
   }
 
   return (
-    <Tip label={tooltipLabel} placement="toolbar">
+    <Tip label={tooltipLabel} placement={tool.tipPlacement ?? 'toolbar'}>
       <Button
         aria-label={tool.label}
         aria-pressed={tool.active ?? undefined}
