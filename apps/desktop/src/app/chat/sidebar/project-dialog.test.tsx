@@ -66,7 +66,8 @@ vi.mock('@/store/projects', () => ({
   enterProject,
   generateProjectIdea: vi.fn(),
   pickProjectFolders,
-  renameProject: vi.fn()
+  renameProject: vi.fn(),
+  requestStartWorkSession: vi.fn()
 }))
 
 beforeEach(() => {
@@ -181,6 +182,28 @@ describe('ProjectDialog', () => {
     await waitFor(() => expect(createProject).toHaveBeenCalledOnce())
 
     expect(createProject.mock.calls[0]?.[0]).toMatchObject({ dropPlacement: undefined })
+  })
+
+  it('opens a fresh chat at the new project root after a plain create', async () => {
+    const { requestStartWorkSession } = vi.mocked(await import('@/store/projects'))
+
+    createProject.mockResolvedValue({ id: 'p_created', primary_path: '/Users/test/my-folder' })
+    $newProjectDropPlacement.set(null)
+    render(<ProjectDialog />)
+    await fillCreateForm()
+
+    await waitFor(() => expect(requestStartWorkSession).toHaveBeenCalledWith('/Users/test/my-folder'))
+  })
+
+  it('leaves a drag create to open its draft where it was dropped', async () => {
+    const { requestStartWorkSession } = vi.mocked(await import('@/store/projects'))
+
+    $newProjectDropPlacement.set({ anchor: 'workspace', dir: 'center' })
+    render(<ProjectDialog />)
+    await fillCreateForm()
+
+    await waitFor(() => expect(enterProject).toHaveBeenCalledWith('p_created'))
+    expect(requestStartWorkSession).not.toHaveBeenCalled()
   })
 })
 

@@ -31,7 +31,8 @@ import {
   enterProject,
   generateProjectIdea,
   pickProjectFolders,
-  renameProject
+  renameProject,
+  requestStartWorkSession
 } from '@/store/projects'
 
 import { baseName } from './projects/workspace-groups'
@@ -177,6 +178,15 @@ export function ProjectDialog() {
 
         if (created) {
           enterProject(created.id)
+
+          // A plain create lands on a fresh chat in the new project instead of
+          // leaving the old conversation on screen. A drag create already opens
+          // its draft where it was dropped ($newProjectSessionRequest).
+          const root = created.primary_path ?? created.folders?.[0]?.path ?? folders[0]
+
+          if (!dropPlacement && root) {
+            requestStartWorkSession(root)
+          }
         }
       }, clearNewProjectDropPlacement)
     }
