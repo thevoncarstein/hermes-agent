@@ -618,6 +618,32 @@ def test_startup_fallback_re_resolves_reasoning_for_the_fallback_model(monkeypat
     assert shell.reasoning_config["effort"] == expected_effort
 
 
+def test_startup_fallback_uses_the_entry_reasoning_effort(monkeypatch):
+    """A fallback entry's own ``reasoning_effort`` outranks the per-model override and global
+    effort when the startup auth fallback swaps onto it."""
+    cli = _import_cli()
+    monkeypatch.setattr(cli, "_cprint", lambda *a, **k: None)
+    monkeypatch.setitem(cli.CLI_CONFIG, "model", {"default": "primary-model", "provider": "openai-codex"})
+    monkeypatch.setitem(cli.CLI_CONFIG, "fallback_providers", [
+        {"provider": "zai", "model": "glm-5.3-flash", "reasoning_effort": "xhigh"}])
+    monkeypatch.setitem(cli.CLI_CONFIG, "agent", {
+        **cli.CLI_CONFIG.get("agent", {}), "reasoning_effort": "low",
+        "reasoning_overrides": {"glm-5.3-flash": "high"}})
+
+    def _runtime_resolve(requested=None, **kwargs):
+        if requested == "openai-codex":
+            raise AuthError("quota exhausted", provider="openai-codex", code="auth_failed")
+        return {"provider": "zai", "api_mode": "chat_completions",
+                "base_url": "https://api.z.ai/api/coding/paas/v4", "api_key": "sk-zai", "source": "env"}
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+    shell = cli.HermesCLI(compact=True, max_turns=1)
+
+    assert shell._ensure_runtime_credentials() is True
+    assert shell.model == "glm-5.3-flash"
+    assert shell.reasoning_config == {"enabled": True, "effort": "xhigh"}
+
+
 def test_custom_entry_model_swap_re_resolves_reasoning(monkeypatch):
     """`hermes chat --model <custom-provider-name>`: the runtime's explicit `model` replaces the
     slug, so the CLI-level reasoning_config must follow to that model's per-model override."""

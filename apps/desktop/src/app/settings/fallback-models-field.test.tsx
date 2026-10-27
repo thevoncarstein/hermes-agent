@@ -124,4 +124,18 @@ describe('FallbackModelsField', () => {
 
     await waitFor(() => expect(screen.getAllByLabelText('Remove')).toHaveLength(1))
   })
+
+  it('stores a per-fallback reasoning effort and drops it again on inherit', async () => {
+    const onChange = await renderField(CHAIN)
+
+    fireEvent.click(screen.getAllByRole('combobox', { name: 'Fallback reasoning effort' })[1])
+    fireEvent.click(await screen.findByRole('option', { name: 'High' }))
+
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual([CHAIN[0], { ...CHAIN[1], reasoning_effort: 'high' }])
+
+    fireEvent.click(screen.getAllByRole('combobox', { name: 'Fallback reasoning effort' })[1])
+    fireEvent.click(await screen.findByRole('option', { name: /inherit/ }))
+
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual(CHAIN)
+  })
 })

@@ -15,6 +15,29 @@ from utils import base_url_host_matches
 logger = logging.getLogger(__name__)
 
 
+def _reresolve_fallback_reasoning_config(agent, entry: dict | None = None) -> None:
+    """The entry's own ``reasoning_effort`` > per-model override > global reasoning_effort (YAML
+    False = disabled); a config load failure keeps the current reasoning_config rather than
+    killing the swap."""
+    from hermes_constants import parse_reasoning_effort
+    # A fallback is often a cheaper or different-family model, so the primary's effort is the
+    # wrong level for it; the entry's choice wins. An unknown level falls through to the ladder.
+    own = parse_reasoning_effort((entry or {}).get("reasoning_effort"))
+    if own is not None:
+        agent.reasoning_config = own
+        logger.info("Fallback %s: reasoning_config from entry: %s", agent.model, own)
+        return
+    try:
+        # Re-resolve reasoning_config for the new fallback model (Closes #21256). Wrapped in try/except
+        # because a config load failure must not kill the swap.
+        from hermes_cli.config import load_config
+        from hermes_constants import resolve_reasoning_config
+        agent.reasoning_config = resolve_reasoning_config(load_config() or {}, agent.model)
+        logger.info("Fallback %s: reasoning_config resolved: %s", agent.model, agent.reasoning_config)
+    except Exception as _reasoning_err:  # health: allow BLE001 -- moved verbatim from chat_completion_helpers; a config load failure must not kill the swap
+        logger.debug("Failed to resolve reasoning_config for fallback %s; keeping current: %s", agent.model, _reasoning_err)
+
+
 def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: str) -> Optional[tuple[str, str]]:
     """Swap ``agent`` onto ``entry`` (a fallback-chain-shaped dict). Returns ``(old_model,
     old_provider)``, or None when the provider has no usable client. Sets ``_fallback_activated``
@@ -22,7 +45,7 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
     from agent.auxiliary_client import resolve_provider_client
     from agent.chat_completion_helpers import (
         _fallback_api_mode_hint, _fallback_api_mode_resolved, _rebind_fallback_credential_pool,
-        _reresolve_fallback_reasoning_config, _rescope_fallback_extra_body, _update_fallback_context_compressor,
+        _rescope_fallback_extra_body, _update_fallback_context_compressor,
     )
     from hermes_cli.fallback_config import resolve_entry_api_key
     # Pass the entry's base_url/api_key so custom endpoints (Ollama Cloud) resolve instead
@@ -88,7 +111,7 @@ def bind_route_entry(agent: Any, entry: dict[str, Any], provider: str, model: st
         provider=provider, base_url=base_url, api_mode=api_mode, model=model)
     agent._ensure_lmstudio_runtime_loaded()  # LM Studio: preload before probing context length
     _update_fallback_context_compressor(agent)
-    _reresolve_fallback_reasoning_config(agent)
+    _reresolve_fallback_reasoning_config(agent, entry)
     _rescope_fallback_extra_body(agent, old_model, old_provider, old_base_url)
     return old_model, old_provider
 

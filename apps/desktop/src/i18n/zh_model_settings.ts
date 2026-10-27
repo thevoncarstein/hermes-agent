@@ -50,6 +50,7 @@ export const zhModelSettings: TranslationOverride<ModelSettingsTranslations> = {
   providerDefault: '(提供方默认)',
   fallbackAdd: '添加备用模型',
   fallbackEmpty: '未配置备用模型 — 默认模型失败时才会使用备用模型。',
+  fallbackReasoning: '备用模型推理强度',
   notInCatalog: '不在该提供方的模型列表中 — 调用可能回退到备用模型。',
   moaTitle: '混合智能体（Mixture of Agents）',
   moaPreset: '预设',

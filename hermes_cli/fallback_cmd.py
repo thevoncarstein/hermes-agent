@@ -1,6 +1,7 @@
 """hermes fallback — manage the fallback provider chain (tried in order when the primary fails).
 
-Subcommands: ``list`` (default), ``add`` (same picker as `hermes model`), ``remove``, ``clear``.
+Subcommands: ``list`` (default), ``add`` (same picker as `hermes model`), ``reasoning``, ``remove``,
+``clear``.
 """
 from __future__ import annotations
 
@@ -28,10 +29,47 @@ def _write_chain(config: dict[str, Any], chain: list[dict[str, Any]]) -> None:
     config.pop("fallback_model", None)
 
 
+def _effort_label(entry: dict[str, Any]) -> str:
+    """The entry's own reasoning level, or "" when it inherits the main reasoning settings."""
+    from hermes_constants import parse_reasoning_effort
+    parsed = parse_reasoning_effort(entry.get("reasoning_effort"))
+    if parsed is None:
+        return ""
+    return "reasoning off" if parsed.get("enabled") is False else f"reasoning {parsed.get('effort')}"
+
+
 def _format_entry(entry: dict[str, Any]) -> str:
     """One-line human-readable rendering of a fallback entry."""
     base = entry.get("base_url")
-    return f"{entry.get('model', '?')}  (via {entry.get('provider', '?')}){f'  [{base}]' if base else ''}"
+    effort = _effort_label(entry)
+    return (f"{entry.get('model', '?')}  (via {entry.get('provider', '?')}){f'  [{base}]' if base else ''}"
+            f"{f'  · {effort}' if effort else ''}")
+
+
+def _picker_reasoning_effort(effort_before: Any) -> Optional[str]:
+    """Take the effort the `hermes model` picker just wrote for the FALLBACK pick off the main
+    ``agent.reasoning_effort`` (restoring the primary's value) and return it, or None when the
+    picker left it unchanged. Without this, choosing a fallback's effort silently retuned the
+    primary model."""
+    from hermes_cli.config import load_config, save_config
+    from hermes_cli.setup import _current_reasoning_effort
+    cfg = load_config()
+    agent_cfg = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else None
+    effort_after = copy.deepcopy(agent_cfg.get("reasoning_effort")) if agent_cfg is not None else None
+    if effort_after == effort_before:
+        return None
+    if effort_before is None:
+        agent_cfg.pop("reasoning_effort", None)
+    else:
+        cfg.setdefault("agent", {})["reasoning_effort"] = effort_before
+    save_config(cfg)
+    return _current_reasoning_effort({"agent": {"reasoning_effort": effort_after}}) or None
+
+
+def _reasoning_effort_before() -> Any:
+    from hermes_cli.config import load_config
+    agent_cfg = load_config().get("agent")
+    return copy.deepcopy(agent_cfg.get("reasoning_effort")) if isinstance(agent_cfg, dict) else None
 
 
 def _extract_fallback_from_model_cfg(model_cfg: Any) -> Optional[dict[str, Any]]:
@@ -146,6 +184,7 @@ def cmd_fallback_add(args) -> None:
 
     # Snapshot BEFORE the picker runs; both route stores must be restored on every exit path.
     model_before = copy.deepcopy(load_config().get("model"))
+    effort_before = _reasoning_effort_before()
     active_provider_before = _snapshot_auth_active_provider()
     print("\n  Adding a fallback provider.  The picker below is the same one used by\n"
           "  `hermes model` — select the provider + model you want as a fallback.\n")
@@ -157,6 +196,7 @@ def cmd_fallback_add(args) -> None:
         new_entry = _extract_fallback_from_model_cfg(model_after)
     except BaseException as picker_error:
         try:
+            _picker_reasoning_effort(effort_before)
             _restore_primary_route(model_before, active_provider_before)
         except Exception as restore_error:
             picker_error.add_note(
@@ -166,7 +206,10 @@ def cmd_fallback_add(args) -> None:
         raise
 
     # From here onward no identity/import/append failure can strand the temporary picker route.
+    picked_effort = _picker_reasoning_effort(effort_before)
     _restore_primary_route(model_before, active_provider_before)
+    if new_entry and picked_effort:
+        new_entry["reasoning_effort"] = picked_effort
 
     if not new_entry:
         print("\n  No fallback added.")
@@ -191,7 +234,43 @@ def cmd_fallback_add(args) -> None:
     save_config(final_cfg)
     print(f"\n  Added fallback: {_format_entry(new_entry)}")
     print(f"  Chain is now {_entries(len(chain))} long.\n")
-    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
+    print("  Run `hermes fallback list` to view, `hermes fallback reasoning` to set its reasoning,\n"
+          "  or `hermes fallback remove` to delete.")
+
+
+def cmd_fallback_reasoning(args) -> None:
+    """Pick an entry, then the reasoning effort used while that fallback is active."""
+    from hermes_cli.config import save_config
+    from hermes_cli.main_provider_setup import _main_model_reasoning_efforts, _prompt_reasoning_effort_selection
+    from hermes_cli.setup import _curses_prompt_choice, _current_reasoning_effort
+    config, chain = _load_chain("  No fallback providers configured — add one with `hermes fallback add`.")
+    if chain is None:
+        return
+
+    idx = _curses_prompt_choice("Select a fallback:", [_format_entry(e) for e in chain] + ["Cancel"], 0)
+    if idx is None or idx < 0 or idx >= len(chain):
+        print("\n  Cancelled — no change.")
+        return
+    entry = chain[idx]
+    efforts = _main_model_reasoning_efforts(entry["model"], entry["provider"])
+    if efforts is None:
+        print(f"\n  {entry['model']} has no reasoning control — no change.")
+        return
+    # "" is the inherit row: drop the entry's own level so the main reasoning settings apply.
+    selected = _prompt_reasoning_effort_selection(
+        efforts, current_effort=_current_reasoning_effort({"agent": {"reasoning_effort": entry.get("reasoning_effort")}}),
+        default_label="Inherit (main reasoning setting)")
+    if selected is None:
+        print("  No change.")
+        return
+    if selected:
+        entry["reasoning_effort"] = selected
+    else:
+        entry.pop("reasoning_effort", None)
+    _write_chain(config, chain)
+    save_config(config)
+    print(f"  Fallback {entry['model']}: "
+          f"{_effort_label(entry) or 'inherits the main reasoning setting'}.\n")
 
 
 def cmd_fallback_remove(args) -> None:
@@ -241,12 +320,13 @@ def cmd_fallback(args) -> None:
     handler = _SUBCOMMANDS.get(sub)
     if handler is None:
         print(f"Unknown fallback subcommand: {sub}")
-        print("Use one of: list, add, remove, clear")
+        print("Use one of: list, add, reasoning, remove, clear")
         raise SystemExit(2)
     handler(args)
 
 
 _SUBCOMMANDS = {
     **dict.fromkeys((None, "", "list", "ls"), cmd_fallback_list), "add": cmd_fallback_add,
+    "reasoning": cmd_fallback_reasoning,
     **dict.fromkeys(("remove", "rm"), cmd_fallback_remove), "clear": cmd_fallback_clear,
 }

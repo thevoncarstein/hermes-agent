@@ -20,6 +20,8 @@ def build_fallback_parser(subparsers) -> None:
         "add",
         help="Pick a provider + model (same picker as `hermes model`) and append to the chain")
     fallback_subparsers.add_parser(
+        "reasoning", help="Pick an entry and the reasoning effort it uses while active")
+    fallback_subparsers.add_parser(
         "remove", aliases=["rm"], help="Pick an entry to delete from the chain")
     fallback_subparsers.add_parser("clear", help="Remove all fallback entries")
     fallback_parser.set_defaults(func=cmd_fallback)

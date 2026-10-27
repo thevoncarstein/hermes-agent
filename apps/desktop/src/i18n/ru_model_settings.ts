@@ -53,6 +53,7 @@ export const ruModelSettings: TranslationOverride<ModelSettingsTranslations> = {
   providerDefault: '(по умолчанию провайдера)',
   fallbackAdd: 'Добавить запасную',
   fallbackEmpty: 'Запасных моделей нет — используется модель по умолчанию, если она не падает.',
+  fallbackReasoning: 'Уровень рассуждений запасной модели',
   notInCatalog: 'нет в списке моделей этого провайдера — вызовы могут уходить на запасную.',
   moaTitle: 'Смесь агентов',
   tasks: ruAuxTasks,
