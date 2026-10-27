@@ -50,6 +50,7 @@ export interface ModelSettingsTranslations {
   providerDefault: string
   fallbackAdd: string
   fallbackEmpty: string
+  fallbackReasoning: string
   notInCatalog: string
   moaTitle: string
   moaPreset: string

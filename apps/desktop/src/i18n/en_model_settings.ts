@@ -50,6 +50,7 @@ export const enModelSettings: ModelSettingsTranslations = {
   providerDefault: '(provider default)',
   fallbackAdd: 'Add fallback',
   fallbackEmpty: 'No fallback models — the default model is used unless it fails.',
+  fallbackReasoning: 'Fallback reasoning effort',
   notInCatalog: "isn't in this provider's model list — calls may fall back to a backup.",
   moaTitle: 'Mixture of Agents',
   moaPreset: 'Preset',

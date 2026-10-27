@@ -1,3 +1,4 @@
+import { REASONING_EFFORT_VALUES } from '@hermes/shared'
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
@@ -48,6 +49,27 @@ function normalizeEntries(value: unknown): FallbackEntry[] {
 
     return { provider: '', model: '' }
   })
+}
+
+const INHERIT_EFFORT = '__inherit__'
+
+// The entry's own `reasoning_effort` (applied when this fallback takes over), or
+// inherit: the main `agent.reasoning_effort` / per-model override. A hand-written
+// `false` is the same "off" the main picker shows as `none`.
+function entryEffort(entry: FallbackEntry): string {
+  const raw = entry.reasoning_effort
+
+  if (raw === false || raw === 'false' || raw === 'disabled') {
+    return 'none'
+  }
+
+  return typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : INHERIT_EFFORT
+}
+
+function withEffort(entry: FallbackEntry, effort: string): FallbackEntry {
+  const { reasoning_effort: _dropped, ...rest } = entry
+
+  return effort === INHERIT_EFFORT ? { ...rest } : { ...rest, reasoning_effort: effort }
 }
 
 function completeEntries(rows: FallbackEntry[]): FallbackEntry[] {
@@ -150,6 +172,22 @@ export function FallbackModelsField({
               providerSlug={entry.provider}
               value={entry.model}
             />
+            <Select
+              onValueChange={effort => commit(rows.map((row, i) => (i === index ? withEffort(row, effort) : row)))}
+              value={entryEffort(entry)}
+            >
+              <SelectTrigger aria-label={m.fallbackReasoning} className={cn('min-w-32', CONTROL_TEXT)}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={INHERIT_EFFORT}>{m.inheritMainEffort}</SelectItem>
+                {REASONING_EFFORT_VALUES.map(value => (
+                  <SelectItem key={value} value={value}>
+                    {value === 'none' ? m.reasoningOff : t.shell.modelOptions[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               aria-label={t.common.remove}
               onClick={() => commit(rows.filter((_, i) => i !== index))}

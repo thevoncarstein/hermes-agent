@@ -27,7 +27,7 @@ The easiest path is the interactive manager:
 hermes fallback
 ```
 
-`hermes fallback` reuses the provider picker from `hermes model` — same provider list, same credential prompts, same validation. Use the subcommands `add`, `list` (alias `ls`), `remove` (alias `rm`), and `clear` to manage the chain. Changes persist under the top-level `fallback_providers:` list in `config.yaml`.
+`hermes fallback` reuses the provider picker from `hermes model` — same provider list, same credential prompts, same validation. Use the subcommands `add`, `list` (alias `ls`), `reasoning`, `remove` (alias `rm`), and `clear` to manage the chain. The reasoning step at the end of `hermes fallback add` sets the new entry's own effort (it no longer changes the primary's `agent.reasoning_effort`); `hermes fallback reasoning` changes it later or sets it back to inherit. Changes persist under the top-level `fallback_providers:` list in `config.yaml`.
 
 If you'd rather edit the YAML directly, add a top-level `fallback_providers` list to `~/.hermes/config.yaml`:
 
@@ -38,6 +38,15 @@ fallback_providers:
 ```
 
 Each entry requires both `provider` and `model`. Entries missing either field are ignored.
+
+An entry may set its own `reasoning_effort` (`minimal` … `ultra`, or `none` to disable thinking), used while that fallback is active. Without it the fallback inherits the main reasoning settings. In the desktop app, each row under **Settings → Model → Fallback Models** has the same choice.
+
+```yaml
+fallback_providers:
+  - provider: openrouter
+    model: anthropic/claude-sonnet-4
+    reasoning_effort: high
+```
 
 When a rate-limit response names its reset time, the primary is benched until exactly then (a provider that says nothing gets the exponential 60 s → 4 h backoff). Optionally, skip the switch when the primary reopens soon:
 
@@ -135,7 +144,7 @@ When triggered, Hermes:
 1. Resolves credentials for the fallback provider (including named custom providers using `key_cmd`)
 2. Builds a new API client, preserving a dynamic credential source across timeout and request-client rebuilds
 3. Swaps the model, provider, and client in-place
-4. Re-resolves the reasoning effort for the fallback model (its `agent.reasoning_overrides` entry, else the global `agent.reasoning_effort`)
+4. Re-resolves the reasoning effort for the fallback model (the entry's own `reasoning_effort`, else its `agent.reasoning_overrides` entry, else the global `agent.reasoning_effort`)
 5. Resets the retry counter and continues the conversation
 
 The switch is seamless — your conversation history, tool calls, and context are preserved. The agent continues from exactly where it left off, just using a different model.

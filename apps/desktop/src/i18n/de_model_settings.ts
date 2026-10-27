@@ -56,6 +56,7 @@ export const deModelSettings: TranslationOverride<ModelSettingsTranslations> = {
   providerDefault: '(Anbietervorgabe)',
   fallbackAdd: 'Fallback hinzufügen',
   fallbackEmpty: 'Keine Fallback-Modelle — es wird das Standardmodell verwendet, außer es schlägt fehl.',
+  fallbackReasoning: 'Reasoning-Aufwand des Fallbacks',
   notInCatalog: 'ist nicht in der Modellliste dieses Anbieters enthalten — Aufrufe können auf ein Backup ausweichen.',
   moaTitle: 'Mixture of Agents',
   moaPreset: 'Voreinstellung',

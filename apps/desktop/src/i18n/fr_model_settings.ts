@@ -58,6 +58,7 @@ export const frModelSettings: TranslationOverride<ModelSettingsTranslations> = {
   providerDefault: '(par défaut du fournisseur)',
   fallbackAdd: 'Ajouter un secours',
   fallbackEmpty: "Aucun modèle de secours — le modèle par défaut est utilisé sauf en cas d'échec.",
+  fallbackReasoning: 'Effort de raisonnement du secours',
   notInCatalog: "n'est pas dans la liste des modèles de ce fournisseur — les appels peuvent basculer sur un secours.",
   moaTitle: "Mélange d'agents",
   moaPreset: 'Préréglage',

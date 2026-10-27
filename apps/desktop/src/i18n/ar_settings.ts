@@ -790,6 +790,7 @@ export const arSettings = {
       change: 'تغيير',
       autoUseMain: 'تلقائي · استخدام النموذج الرئيسي',
       inheritMainEffort: 'وراثة · جهد النموذج الرئيسي',
+      fallbackReasoning: 'جهد الاستدلال للنموذج الاحتياطي',
       inheritsFrom: task => `يرث من ${task}`,
       followTask: task => `اتباع ${task}`,
       providerDefault: '(افتراضي المزوّد)',

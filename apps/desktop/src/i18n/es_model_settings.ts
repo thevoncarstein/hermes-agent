@@ -57,6 +57,7 @@ export const esModelSettings: TranslationOverride<ModelSettingsTranslations> = {
   providerDefault: '(predeterminado del proveedor)',
   fallbackAdd: 'Añadir respaldo',
   fallbackEmpty: 'No hay modelos de respaldo; se usa el modelo predeterminado salvo que falle.',
+  fallbackReasoning: 'Esfuerzo de razonamiento del respaldo',
   notInCatalog: 'no está en la lista de modelos de este proveedor; las llamadas pueden recurrir a un respaldo.',
   moaTitle: 'Mixture of Agents',
   moaPreset: 'Preajuste',

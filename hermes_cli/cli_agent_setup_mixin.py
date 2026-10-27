@@ -363,8 +363,14 @@ class CLIAgentSetupMixin:
         # --reasoning is the user's intent for this run and outranks the new model's config.
         if self.model != _model_at_entry and getattr(self, "_explicit_reasoning_config", None) is None:
             from hermes_cli.cli_model_switch_mixin import _resolve_cli_reasoning
+            from hermes_constants import parse_reasoning_effort
             _resolve_cli_reasoning(self)
+            # Consume-once: only the auth-fallback swap that set it this call applies it.
+            entry_effort = parse_reasoning_effort(getattr(self, "_fallback_entry_reasoning", None))
+            if entry_effort is not None:
+                self.reasoning_config = entry_effort
             logger.info("Model moved to %s: reasoning_config resolved: %s", self.model, self.reasoning_config)
+        self._fallback_entry_reasoning = None
 
         # AIAgent/OpenAI client holds auth at init, so rebuild on key/routing/model change.
         if (credentials_changed or routing_changed or model_changed) and self.agent is not None:
@@ -408,7 +414,9 @@ class CLIAgentSetupMixin:
                     platform="cli")
                 self.requested_provider = _fb_provider
                 self.model = _fb_model
-                # reasoning_config follows the swap in _ensure_runtime_credentials (the only caller).
+                # reasoning_config follows the swap in _ensure_runtime_credentials (the only caller),
+                # which gives the entry's own reasoning_effort precedence over the config ladder.
+                self._fallback_entry_reasoning = _fb.get("reasoning_effort")
                 return runtime
             except Exception:
                 continue
