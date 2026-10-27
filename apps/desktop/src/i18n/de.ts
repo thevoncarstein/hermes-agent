@@ -4847,6 +4847,9 @@ export const deOverrides = {
       copyUrl: 'URL kopieren',
       copyResolvedUrl: 'Aufgelöste URL kopieren'
     },
+    path: {
+      open: 'Öffnen'
+    },
     image: {
       copyImage: 'Bild kopieren',
       copyImageAddress: 'Bildadresse kopieren',

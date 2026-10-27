@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo } from 'react'
 
 import { COMPOSER_AREAS } from '@/app/chat/composer/contrib'
+import { pickRevealLabel } from '@/app/right-sidebar/file-actions'
 import { terminalMenuHandleFor } from '@/app/right-sidebar/terminal/terminal-context-menu'
 import { openStarMapNodeMenuFor } from '@/app/starmap/context-menu-handle'
 import { DROPDOWN_KIT } from '@/components/ui/actions-menu'
@@ -27,6 +28,7 @@ import { formatCombo } from '@/lib/keybinds/combo'
 import { isRemoteGateway } from '@/lib/media'
 import { reachablePreviewUrl } from '@/lib/preview-reach'
 import { isBrowserOwnedTouch } from '@/lib/touch-interaction'
+import { copyFilePath, revealFile } from '@/store/file-actions'
 import { openPreview } from '@/store/preview'
 
 import { type ComposerMenuRow, type ComposerMenuTarget, resolveComposerMenuSections } from './composer-menu'
@@ -223,6 +225,34 @@ function hasCuttableSelection(formField: HTMLInputElement | HTMLTextAreaElement 
   return formField ? (formField.selectionStart ?? 0) !== (formField.selectionEnd ?? 0) : selectionText.length > 0
 }
 
+/** A chat path link (folder or file on this machine): open it, show it in the
+ *  OS file manager, or copy it. No section when the click missed one. */
+/** A click on a link, path link, image or editable field gets this app's menu, not the pane's bare one. */
+function targetOwnsMenu(target: ContextMenuDomTarget): boolean {
+  return Boolean(target.linkUrl || target.localPath || target.onImage || target.editable)
+}
+
+function localPathSections(path: string, t: Translations): ReactNode[][] {
+  if (!path) {
+    return []
+  }
+
+  const copy = t.contextMenu
+
+  return [
+    [
+      <Item icon="folder-opened" key="path-open" label={copy.path.open} onSelect={() => openExternalLink(path)} />,
+      <Item
+        icon="folder"
+        key="path-open-location"
+        label={pickRevealLabel(t.fileMenu.revealFinder, t.fileMenu.revealExplorer, t.fileMenu.revealFileManager)}
+        onSelect={() => void revealFile(path)}
+      />,
+      <Item icon="copy" key="path-copy" label={t.fileMenu.copyPath} onSelect={() => void copyFilePath(path)} />
+    ]
+  ]
+}
+
 function domSections(
   open: Extract<OpenContextMenu, { kind: 'dom' }>,
   t: Translations,
@@ -323,6 +353,8 @@ function domSections(
       ].filter(Boolean)
     )
   }
+
+  sections.push(...localPathSections(target.localPath, t))
 
   if (target.onImage) {
     sections.push(
@@ -736,7 +768,7 @@ export function AppContextMenu() {
         )
       )
 
-      const owned = Boolean(target.linkUrl || target.onImage || target.editable || selected)
+      const owned = selected || targetOwnsMenu(target)
 
       if (leaveEditableToBrowser(event, target)) {
         return

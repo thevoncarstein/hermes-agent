@@ -3258,6 +3258,9 @@ export const jaOverrides = {
       copyUrl: 'URL をコピー',
       copyResolvedUrl: '解決後の URL をコピー'
     },
+    path: {
+      open: '開く'
+    },
     image: {
       copyImage: '画像をコピー',
       copyImageAddress: '画像アドレスをコピー',

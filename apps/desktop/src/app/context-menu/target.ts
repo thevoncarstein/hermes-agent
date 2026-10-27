@@ -19,6 +19,8 @@ export interface ContextMenuDomTarget {
   editable: HTMLElement | null
   /** `href` of the enclosing anchor, as written (never absolutized). */
   linkUrl: string
+  /** A local file or folder path link in chat text (`data-local-path`). */
+  localPath: string
   /** Source URL of the clicked image, when the click landed on one. */
   imageUrl: string
   /** True when the click landed on an `<img>` (imageUrl may still be empty
@@ -49,6 +51,7 @@ export function resolveDomTarget(element: Element | null): ContextMenuDomTarget 
   const dialogContent = element?.closest('[data-slot="dialog-content"]')
   const image = element?.closest('img')
   const linkUrl = anchor?.getAttribute('href')?.trim() ?? ''
+  const localPath = element?.closest('[data-local-path]')?.getAttribute('data-local-path')?.trim() ?? ''
   const editable = editableFrom(element)
 
   return {
@@ -57,6 +60,7 @@ export function resolveDomTarget(element: Element | null): ContextMenuDomTarget 
     editable,
     // A placeholder anchor is not a link the menu can act on.
     linkUrl: linkUrl === '#' ? '' : linkUrl,
+    localPath,
     imageUrl: image instanceof HTMLImageElement ? image.currentSrc || image.src : '',
     onImage: Boolean(image),
     selectionText: window.getSelection()?.toString().trim() ?? ''

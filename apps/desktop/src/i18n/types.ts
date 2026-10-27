@@ -3875,6 +3875,9 @@ export interface Translations extends NoticeTranslations {
       copyUrl: string
       copyResolvedUrl: string
     }
+    path: {
+      open: string
+    }
     image: {
       copyImage: string
       copyImageAddress: string
