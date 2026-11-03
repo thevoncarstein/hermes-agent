@@ -560,6 +560,11 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
     }
 
     applyProjectTreePayload(res, context)
+    rememberProjectTree(context.connectionId, profile, {
+      activeKnown: true,
+      owner: { connectionId: context.connectionId, stampLocal: context.stampLocal },
+      payload: res
+    })
     markProjectsRpcSuccess()
   } catch (err) {
     if (generation === projectTreeRefreshGeneration && stillOnProjectsContext(context)) {
@@ -569,6 +574,92 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
     if (generation === projectTreeRefreshGeneration && activeGateway() === gateway) {
       $projectTreeLoading.set(false)
     }
+  }
+}
+
+// The last tree each (connection, profile) showed, so switching back to a
+// profile paints its projects the moment the gateway lands instead of keeping
+// the previous profile's tree up for a whole `projects.tree` round trip. Stale
+// by design: the refresh that follows every switch replaces it.
+interface CachedProjectTree {
+  // A REST prefetch has no active pointer (that lives with the profile's own
+  // backend), so painting it must leave $activeProjectId alone.
+  activeKnown: boolean
+  owner: ProjectRowOwner
+  payload: ProjectTreePayload
+}
+
+const MAX_CACHED_PROJECT_TREES = 16
+const projectTreeCache = new Map<string, CachedProjectTree>()
+
+const projectTreeCacheKey = (connectionId: null | string, profile: string) =>
+  `${connectionId ?? ''}\n${normalizeProfileKey(profile)}`
+
+function rememberProjectTree(connectionId: null | string, profile: string, entry: CachedProjectTree): void {
+  const key = projectTreeCacheKey(connectionId, profile)
+  projectTreeCache.delete(key)
+  projectTreeCache.set(key, entry)
+
+  for (const stale of [...projectTreeCache.keys()].slice(0, -MAX_CACHED_PROJECT_TREES)) {
+    projectTreeCache.delete(stale)
+  }
+}
+
+export function clearProjectTreeCache(): void {
+  projectTreeCache.clear()
+}
+
+// Paint the newly active profile's cached tree. Tombstone pruning stays with
+// the live refresh: a stale snapshot's scoped ids must not release a pending
+// delete early.
+export function paintCachedProjectTree(): void {
+  const profile = projectProfile()
+  const cached = profile ? projectTreeCache.get(projectTreeCacheKey(activeGatewayConnectionId(), profile)) : undefined
+
+  if (!cached) {
+    return
+  }
+
+  $projectTree.set(
+    replaceEqualDeep(
+      $projectTree.get(),
+      (cached.payload.projects ?? []).map(project => tagProjectSessionConnection(project, cached.owner))
+    )
+  )
+
+  if (cached.activeKnown) {
+    $activeProjectId.set(cached.payload.active_id ?? null)
+  }
+}
+
+// Fill the cache for a profile being switched TO, while its backend is still
+// spawning: the REST tree reads that profile's databases through the backend
+// already up, so the first paint doesn't wait out the spawn. An existing entry
+// wins — it came from the profile's own backend and carries discovered repos.
+export async function prefetchProjectTreeForProfile(profile: string): Promise<void> {
+  const owner = projectRowOwner()
+  const key = projectTreeCacheKey(owner.connectionId, profile)
+
+  if (projectTreeCache.has(key)) {
+    return
+  }
+
+  const params = new URLSearchParams({
+    preview_limit: String(projectTreePreviewLimit()),
+    profile: normalizeProfileKey(profile)
+  })
+
+  try {
+    const payload = await hermesApi<ProjectTreePayload>({
+      path: `/api/profiles/projects/tree?${params.toString()}`,
+      timeoutMs: PROJECT_TREE_REQUEST_TIMEOUT_MS
+    })
+
+    if (!projectTreeCache.has(key) && activeGatewayConnectionId() === owner.connectionId) {
+      rememberProjectTree(owner.connectionId, profile, { activeKnown: false, owner, payload })
+    }
+  } catch {
+    // Best-effort warm-up: the post-switch refresh still runs.
   }
 }
 

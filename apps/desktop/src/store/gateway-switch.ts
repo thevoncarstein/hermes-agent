@@ -9,6 +9,7 @@ import { resetDeadSessionPrune } from '@/store/dead-session-prune'
 import { resetSessionsLimit } from '@/store/layout'
 import { resetLiveSync } from '@/store/live-sync'
 import { invalidateProfileListFetches } from '@/store/profile'
+import { clearProfileSidebarCache } from '@/store/profile-sidebar-cache'
 import { exitProjectScope } from '@/store/project-scope'
 import { clearLiveReactionOverlays } from '@/store/reactions-local'
 import {
@@ -220,6 +221,8 @@ export function wipeSessionListsForGatewaySwitch(): void {
   // entered would root the next draft's cwd in the old source's project.
   exitProjectScope()
   setSessions([])
+  // The cached per-profile lists name the outgoing source's sessions/projects.
+  clearProfileSidebarCache()
   // Reset AFTER the wipe: the wipe's empty payload schedules a sweep, and
   // resetting first would leave that timer live — sweeping every stored id
   // against a backend that hasn't answered yet. The reset cancels the timer,
