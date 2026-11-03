@@ -21,6 +21,7 @@ from gateway.hosted_room_policy_checkpoint import HostedRoomPolicyCheckpoint, Po
 from gateway.hosted_room_peer import (
     GatewayRoomCatalog, HostedMemberDispatch, PROTOCOL_VERSION, room_grant_needs_dispatch_refresh)
 from tui_gateway.hosted_room_driver import HostedRoomBinding, HostedRoomRuntime
+from tui_gateway.hosted_room_member_activity import running_member_steps
 from tui_gateway.hosted_room_server_rpc import HostedRoomServerRPC
 from tui_gateway.hosted_room_peer_http import (
     PeerRunsHTTPClient, PeerRunsHTTPError, digest_reauthorization_error)
@@ -585,11 +586,20 @@ class HostedRoomService:
             pending_actions.extend(
                 dict(action) for (action_room_id, _member_id), action
                 in self._pending_actions.items() if action_room_id == room_id)
-        # Who is answering right now: clients render per-member working indicators from it.
+        # Who is answering right now, and what each running member is doing: clients render
+        # per-member working indicators from it.
         member_activity = [
             {"member_id": str(task["payload"].get("target_member_id") or task["payload"]["target_profile"]),
-             "status": str(task["status"])}
+             "status": str(task["status"]), "task_id": task["identity"].task_id}
             for task in tasks if task["status"] in _LIVE_STATUSES]
+        steps = running_member_steps(
+            room_id, ((row["member_id"], row["task_id"]) for row in member_activity if row["status"] == "running"))
+        steps.update((str(action["member_id"]), {"kind": "approval"}) for action in pending_actions
+                     if action.get("kind") == "approval" and action.get("member_id"))
+        for row in member_activity:
+            del row["task_id"]
+            if row["status"] == "running" and row["member_id"] in steps:
+                row["step"] = steps[row["member_id"]]
         return {
             "running": runtime["running"], "working": bool(member_activity),
             "blocked": room_id in runtime["blocked_rooms"]

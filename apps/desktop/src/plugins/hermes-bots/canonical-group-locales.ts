@@ -36,6 +36,10 @@ export interface CanonicalGroupMessages {
   memberWorking: string
   memberQueued: string
   groupWorking: string
+  stepTool: string
+  stepThinking: string
+  stepWriting: string
+  stepApproval: string
 }
 
 export const CANONICAL_GROUP_LOCALES = {
@@ -76,7 +80,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'Upload failed',
     memberWorking: 'Working',
     memberQueued: 'Queued',
-    groupWorking: 'The group is working…'
+    groupWorking: 'The group is working…',
+    stepTool: 'Running',
+    stepThinking: 'Thinking',
+    stepWriting: 'Writing',
+    stepApproval: 'Waiting for approval'
   },
   ja: {
     roomStopped: 'グループが停止しました',
@@ -115,7 +123,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'アップロードに失敗しました',
     memberWorking: '作業中',
     memberQueued: '待機中',
-    groupWorking: 'グループが作業中です…'
+    groupWorking: 'グループが作業中です…',
+    stepTool: '実行中',
+    stepThinking: '考え中',
+    stepWriting: '書いています',
+    stepApproval: '承認待ち'
   },
   zh: {
     roomStopped: '群组已停止',
@@ -154,7 +166,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: '上传失败',
     memberWorking: '工作中',
     memberQueued: '排队中',
-    groupWorking: '群组正在处理…'
+    groupWorking: '群组正在处理…',
+    stepTool: '正在运行',
+    stepThinking: '思考中',
+    stepWriting: '正在撰写',
+    stepApproval: '等待批准'
   },
   'zh-hant': {
     roomStopped: '群組已停止',
@@ -193,7 +209,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: '上傳失敗',
     memberWorking: '工作中',
     memberQueued: '排隊中',
-    groupWorking: '群組正在處理…'
+    groupWorking: '群組正在處理…',
+    stepTool: '正在執行',
+    stepThinking: '思考中',
+    stepWriting: '正在撰寫',
+    stepApproval: '等待核准'
   },
   ar: {
     roomStopped: 'أُوقفت المجموعة',
@@ -232,7 +252,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'فشل الرفع',
     memberWorking: 'يعمل',
     memberQueued: 'في الانتظار',
-    groupWorking: 'المجموعة تعمل…'
+    groupWorking: 'المجموعة تعمل…',
+    stepTool: 'يشغّل',
+    stepThinking: 'يفكّر',
+    stepWriting: 'يكتب',
+    stepApproval: 'بانتظار الموافقة'
   },
   ru: {
     roomStopped: 'Группа остановлена',
@@ -274,7 +298,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'Не удалось загрузить файл',
     memberWorking: 'Работает',
     memberQueued: 'В очереди',
-    groupWorking: 'Группа работает…'
+    groupWorking: 'Группа работает…',
+    stepTool: 'Выполняет',
+    stepThinking: 'Думает',
+    stepWriting: 'Пишет',
+    stepApproval: 'Ждёт подтверждения'
   },
   fr: {
     roomStopped: 'Groupe arrêté',
@@ -315,7 +343,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'Échec du téléversement',
     memberWorking: 'En cours',
     memberQueued: 'En attente',
-    groupWorking: 'Le groupe travaille…'
+    groupWorking: 'Le groupe travaille…',
+    stepTool: 'Exécute',
+    stepThinking: 'Réfléchit',
+    stepWriting: 'Rédige',
+    stepApproval: "En attente d'approbation"
   },
   de: {
     roomStopped: 'Gruppe angehalten',
@@ -357,7 +389,11 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'Hochladen fehlgeschlagen',
     memberWorking: 'Arbeitet',
     memberQueued: 'In der Warteschlange',
-    groupWorking: 'Die Gruppe arbeitet…'
+    groupWorking: 'Die Gruppe arbeitet…',
+    stepTool: 'Führt aus',
+    stepThinking: 'Denkt nach',
+    stepWriting: 'Schreibt',
+    stepApproval: 'Wartet auf Freigabe'
   },
   es: {
     roomStopped: 'Grupo detenido',
@@ -398,6 +434,10 @@ export const CANONICAL_GROUP_LOCALES = {
     uploadFailed: 'Error al subir',
     memberWorking: 'Trabajando',
     memberQueued: 'En cola',
-    groupWorking: 'El grupo está trabajando…'
+    groupWorking: 'El grupo está trabajando…',
+    stepTool: 'Ejecutando',
+    stepThinking: 'Pensando',
+    stepWriting: 'Escribiendo',
+    stepApproval: 'Esperando aprobación'
   }
 } satisfies Record<string, CanonicalGroupMessages>

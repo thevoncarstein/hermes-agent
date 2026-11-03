@@ -1636,10 +1636,17 @@ export interface RoomDriverStatus {
   member_activity?: RoomMemberActivity[]
   peer_routes: PeerRouteStatus[]
 }
-/** One live room task: ``status`` is ``queued``, ``running`` or ``stopping``. */
+/** One live room task: ``status`` is ``queued``, ``running`` or ``stopping``. A running member carries its current ``step`` once its turn has reported one (absent from older gateways). */
 export interface RoomMemberActivity {
   member_id: string
   status: string
+  step?: RoomMemberStep | null
+}
+/** What a running member is doing: ``kind`` is ``tool`` (``tool`` names it, ``detail`` previews its arguments), ``thinking``, ``writing`` or ``approval`` (waiting on the room's Allow/Deny). */
+export interface RoomMemberStep {
+  kind: 'tool' | 'thinking' | 'writing' | 'approval'
+  tool?: string | null
+  detail?: string | null
 }
 export interface PeerRouteStatus {
   room_id: string

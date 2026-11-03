@@ -175,19 +175,29 @@ it('a Send that converges on another window\'s pending intent keeps this window\
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false)
 })
 
-it('shows which bots are working, and still says the group is working on a gateway without member activity', async () => {
+it('says what each bot is doing, and still says the group is working on a gateway without member activity', async () => {
   const members = [{ member_id: 'ops', profile: 'ops', handle: 'ops', display_name: 'Ops' },
     { member_id: 'qa', profile: 'qa', handle: 'qa', display_name: 'QA' }]
 
   let driver: Record<string, unknown> = { working: true, member_activity: [
-    { member_id: 'qa', status: 'queued' }, { member_id: 'ops', status: 'running' }, { member_id: 'ops', status: 'queued' }] }
+    { member_id: 'qa', status: 'queued' },
+    { member_id: 'ops', status: 'running', step: { kind: 'tool', tool: 'terminal', detail: 'npm test' } },
+    { member_id: 'ops', status: 'queued' }] }
 
   request.mockImplementation(async (_route, method) => method === 'groups.state'
     ? { room: { name: 'Room', members }, driver_status: driver } : method === 'groups.log' ? { events: [] } : {})
   const view = render(<CanonicalGroupWorkspace binding={{ connectionId: 'local', profile: 'team', roomId: 'busy' }} />)
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Working: Ops'))
-  const phase = (name: string) => screen.getByText(name).closest('li')?.getAttribute('data-phase')
+  const line = (id: string) => screen.getByRole('status').querySelector(`[data-member="${id}"]`)?.textContent
+  await waitFor(() => expect(line('ops')).toBe('OpsRunning terminalnpm test'))
+  expect(line('qa')).toBe('QAQueued')
+  const phase = (name: string) => screen.getAllByText(name).find(el => el.closest('li'))?.closest('li')?.getAttribute('data-phase')
   expect([phase('Ops'), phase('QA')]).toEqual(['working', 'queued'])
+
+  // The next poll moves the line to the member's new step; a running member with no step yet is just working.
+  driver = { working: true, member_activity: [
+    { member_id: 'ops', status: 'running', step: { kind: 'writing' } }, { member_id: 'qa', status: 'running' }] }
+  await waitFor(() => expect(line('ops')).toBe('OpsWriting'), { timeout: 5_000 })
+  expect(line('qa')).toBe('QAWorking')
 
   // The same mounted room clears both indicators on its next poll once the turn settles.
   driver = { working: false, member_activity: [] }

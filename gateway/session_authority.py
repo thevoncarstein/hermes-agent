@@ -971,6 +971,8 @@ class SessionAuthority:
             if self.executing.get(session_id) != generation:
                 return False
             delivered = live.event_stream.publish(session_id, payload, event_type=event_type)
+            from tui_gateway.hosted_room_member_activity import record_session_event
+            record_session_event(session_id, event_type, payload)
             from gateway.session_api_turn import publish_api_event
             observed = publish_api_event(self, session_id, event_type, payload)
             return bool(delivered or observed)

@@ -34157,7 +34157,7 @@
       },
       "RoomMemberActivity": {
         "additionalProperties": false,
-        "description": "One live room task: ``status`` is ``queued``, ``running`` or ``stopping``.",
+        "description": "One live room task: ``status`` is ``queued``, ``running`` or ``stopping``. A running member\ncarries its current ``step`` once its turn has reported one (absent from older gateways).",
         "properties": {
           "member_id": {
             "title": "Member Id",
@@ -34166,6 +34166,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoomMemberStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -34242,6 +34253,51 @@
           }
         },
         "title": "RoomMemberInput",
+        "type": "object"
+      },
+      "RoomMemberStep": {
+        "additionalProperties": false,
+        "description": "What a running member is doing: ``kind`` is ``tool`` (``tool`` names it, ``detail`` previews\nits arguments), ``thinking``, ``writing`` or ``approval`` (waiting on the room's Allow/Deny).",
+        "properties": {
+          "kind": {
+            "enum": [
+              "tool",
+              "thinking",
+              "writing",
+              "approval"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "RoomMemberStep",
         "type": "object"
       },
       "RoomTaskReceipt": {

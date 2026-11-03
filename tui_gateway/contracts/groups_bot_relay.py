@@ -7,6 +7,8 @@ Handlers: ``tui_gateway/methods_groups.py``, ``tui_gateway/methods_bot_relay.py`
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from .base import JsonValue, Params, Result, WireEnum
@@ -208,11 +210,22 @@ class PeerRouteStatus(Result):
     status: str
 
 
+class RoomMemberStep(Result):
+    """What a running member is doing: ``kind`` is ``tool`` (``tool`` names it, ``detail`` previews
+    its arguments), ``thinking``, ``writing`` or ``approval`` (waiting on the room's Allow/Deny)."""
+
+    kind: Literal["tool", "thinking", "writing", "approval"]
+    tool: str | None = None
+    detail: str | None = None
+
+
 class RoomMemberActivity(Result):
-    """One live room task: ``status`` is ``queued``, ``running`` or ``stopping``."""
+    """One live room task: ``status`` is ``queued``, ``running`` or ``stopping``. A running member
+    carries its current ``step`` once its turn has reported one (absent from older gateways)."""
 
     member_id: str
     status: str
+    step: RoomMemberStep | None = None
 
 
 class RoomDriverStatus(Result):

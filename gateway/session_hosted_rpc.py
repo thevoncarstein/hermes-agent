@@ -35,6 +35,8 @@ class HostedRoomAuthorityRPC:
         from gateway.session_local_recovery import local_identity
         self.ref = SessionRef(authority.profile_id, local_identity(
             authority.profile_id, principal.subject, self.creation_id))
+        from tui_gateway.hosted_room_member_activity import bind_member_session
+        bind_member_session(self.ref.session_id, room_id, member_id)
 
     def _call(self, operation, **params):
         try:
@@ -151,6 +153,9 @@ class HostedRoomAuthorityRPC:
 
     async def _submit(self, params):
         task, generation = params['task'], params['execution_generation']
+        # A new turn starts with no step: the previous turn's last tool is not this one's.
+        from tui_gateway.hosted_room_member_activity import clear_member_step
+        clear_member_step(self.room_id, self.member_id)
         request_id = 'hosted:' + json.dumps([asdict(task), generation], sort_keys=True, separators=(',', ':'))
         # Refuse unknown before submit: submit itself schedules the queue on retries.
         rows = self._rows()
