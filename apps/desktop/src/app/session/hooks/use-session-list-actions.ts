@@ -2,12 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { getApiRequestConnection, listAllProfileSessions, listSidebarSessions, type SessionInfo } from '@/hermes'
 import { sameCronSignature } from '@/lib/session-signatures'
-import {
-  isMessagingSource,
-  LOCAL_SESSION_SOURCE_IDS,
-  MESSAGING_SESSION_SOURCE_IDS,
-  normalizeSessionSource
-} from '@/lib/session-source'
+import { isMessagingSource, normalizeSessionSource } from '@/lib/session-source'
 import { gatewayActivationEpoch } from '@/store/gateway'
 import {
   $pinnedSessionIds,
@@ -20,11 +15,17 @@ import {
 } from '@/store/layout'
 import { messagingTotalsKey, normalizeProfileKey, sidebarProfileForScope } from '@/store/profile'
 import {
+  dropTombstoned,
+  installProfileSidebarCache,
+  MESSAGING_EXCLUDED_SOURCES,
+  rememberProfileSessions,
+  sidebarSessionsRequest
+} from '@/store/profile-sidebar-cache'
+import {
   $messagingSessions,
   $selectedStoredSessionId,
   $sessions,
   carryForwardFailedProfileSessions,
-  CRON_SECTION_LIMIT,
   keepFailedProfileMeta,
   mergeSessionPage,
   MESSAGING_SECTION_LIMIT,
@@ -43,7 +44,6 @@ import {
   stampMessagingRowsWithListServer
 } from '@/store/session'
 import {
-  $removedSessionIds,
   captureSessionTombstoneGenerations,
   sessionRemovalIntersected,
   type SessionTombstoneGenerationSnapshot,
@@ -52,55 +52,6 @@ import {
 import { $sessionTiles, $workingSessionIds, getRecentlySettledSessionIds } from '@/store/session-states'
 
 import { refreshCronJobs as refreshCronJobsStore } from '../../cron/cron-actions'
-
-// The recents list is local-only: cron rows have their own section, kanban
-// dispatcher workers are read on the board, finite one-shot runs (`hermes -z`,
-// `chat -q`) are not conversations, and each messaging platform
-// (telegram, discord, …) is fetched separately into its own self-managed
-// sidebar section (refreshMessagingSessions). Excluding them here keeps
-// "Load more" paging through interactive local chats instead of
-// interleaving gateway threads that bury them. ACP rows are editor-driven
-// conversations: every editor wake mints an auto-titled row, so they would
-// bury local chats — and they were never ended before #118216, which also
-// kept prune/archive away from them.
-const SIDEBAR_EXCLUDED_SOURCES = [
-  'acp',
-  'cron',
-  'kanban',
-  'oneshot',
-  'subagent',
-  'tool',
-  ...MESSAGING_SESSION_SOURCE_IDS
-]
-
-// The messaging slice is the inverse: drop cron + every local source so only
-// external-platform conversations remain, then split per platform in the UI.
-const MESSAGING_EXCLUDED_SOURCES = ['cron', ...LOCAL_SESSION_SOURCE_IDS]
-
-// Drop rows the user just deleted/archived: ANY list fetch (full refresh,
-// "Load more" paging, a per-platform messaging page, the cron slice) can race
-// an in-flight delete RPC, and the backend page still carries the doomed row
-// until the DELETE commits — so it flashed back into the sidebar (#50928).
-// Honoring the optimistic tombstone at every ingestion point keeps the removal
-// stable; the tombstone self-clears once projects.tree confirms the delete,
-// and a failed delete untombstones immediately, so nothing is filtered on the
-// non-destructive paths. A tombstone matches the row on ANY id the
-// conversation has answered to (tip, root, and every intermediate lineage
-// segment) — armed on one name, it must still catch the same conversation
-// returning under another (#123685).
-function dropTombstoned(sessions: SessionInfo[]): SessionInfo[] {
-  const tombstones = $removedSessionIds.get()
-
-  if (!tombstones.size) {
-    return sessions
-  }
-
-  const tombstoned = (session: SessionInfo): boolean => tombstoneRowIds(session).some(id => tombstones.has(id))
-
-  const kept = sessions.filter(session => !tombstoned(session))
-
-  return kept.length === sessions.length ? sessions : kept
-}
 
 // A fetch whose page was READ before an archive/delete committed can land
 // after the projects.tree prune has already dropped the tombstone (the tree is
@@ -369,15 +320,7 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
         // Batched: one request opens each profile DB once and returns all three
         // source-scoped slices, instead of three separate listAllProfileSessions
         // calls that each reopened + re-counted every profile DB per refresh.
-        const fetchPage = () =>
-          listSidebarSessions({
-            recentsProfile: sessionProfile,
-            recentsLimit: limit,
-            recentsExclude: SIDEBAR_EXCLUDED_SOURCES,
-            cronLimit: CRON_SECTION_LIMIT,
-            messagingLimit: MESSAGING_SECTION_LIMIT,
-            messagingExclude: MESSAGING_EXCLUDED_SOURCES
-          })
+        const fetchPage = () => listSidebarSessions({ ...sidebarSessionsRequest(sessionProfile), recentsLimit: limit })
 
         let activationEpoch = gatewayActivationEpoch()
         let result = await fetchPage()
@@ -431,6 +374,11 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
 
             return sameCronSignature(prev, next) ? prev : next
           })
+
+          if (sessionProfile !== 'all') {
+            rememberProfileSessions(sessionProfile, $sessions.get())
+          }
+
           // "Is there another page?" instead of an exact total: the backend
           // reports which profiles filled their window, which costs nothing on
           // top of the rows it already read (the old exact totals ran a COUNT(*)
@@ -532,6 +480,8 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
   // once the view is unfiltered again buys nothing. Whatever the user had
   // paged to by hand is what it returns to.
   const unfilteredLimit = useRef<null | number>(null)
+
+  useEffect(() => installProfileSidebarCache(), [])
 
   useEffect(
     () =>
