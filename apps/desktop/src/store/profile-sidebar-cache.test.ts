@@ -1,8 +1,8 @@
 import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $activeGatewayProfile, $gatewaySwapTarget, setShowAllProfiles } from '@/store/profile'
-import { $sessions } from '@/store/session'
+import { $activeGatewayProfile, $gatewaySwapTarget, $profiles, setShowAllProfiles } from '@/store/profile'
+import { $connection, $sessions } from '@/store/session'
 import type { SessionInfo } from '@/types/hermes'
 
 import {
@@ -51,10 +51,16 @@ const treePayload = (id: string, activeId: null | string = null) => ({
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
+// Every profile resolves on this machine unless a test says otherwise.
+const getConnection = vi.fn(async (profile?: null | string) => ({ mode: 'local', profile }))
+
 let uninstall: () => void
 
 beforeEach(() => {
   vi.clearAllMocks()
+  Object.assign(window, { hermesDesktop: { ...window.hermesDesktop, getConnection } })
+  $connection.set({ mode: 'local' } as never)
+  $profiles.set([])
   setShowAllProfiles(false)
   $activeGatewayProfile.set('default')
   $sessions.set([])
@@ -65,7 +71,10 @@ beforeEach(() => {
   uninstall = installProfileSidebarCache()
 })
 
-afterEach(() => uninstall())
+afterEach(() => {
+  uninstall()
+  vi.useRealTimers()
+})
 
 describe('profile sidebar cache', () => {
   it("paints a profile's last rows the moment the switch back lands, before any refresh", () => {
@@ -131,6 +140,45 @@ describe('profile sidebar cache', () => {
     expect(hermesApi).not.toHaveBeenCalled()
     expect($projectTree.get().map(project => project.id)).toEqual(['p_coder'])
     expect($activeProjectId.get()).toBe('p_coder')
+  })
+
+  it("warms other profiles' lists once idle, so even a first switch paints immediately", async () => {
+    uninstall()
+    vi.useFakeTimers()
+    listSidebarSessions.mockImplementation(
+      async req => ({ recents: { sessions: [row(`${req.recentsProfile}-1`, req.recentsProfile)] } }) as never
+    )
+    hermesApi.mockImplementation(async ({ path }) => treePayload(`p_${new URLSearchParams(path.split('?')[1]).get('profile')}`) as never)
+    $profiles.set([{ name: 'default' }, { name: 'writer' }, { name: 'coder' }] as never)
+    uninstall = installProfileSidebarCache()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(listSidebarSessions).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(listSidebarSessions.mock.calls.map(([req]) => req.recentsProfile)).toEqual(['writer', 'coder'])
+
+    $activeGatewayProfile.set('coder')
+
+    expect(visibleIn('coder').map(session => session.id)).toEqual(['coder-1'])
+    expect($projectTree.get().map(project => project.id)).toEqual(['p_coder'])
+  })
+
+  it('never reads a profile with a remote override through the local backend', async () => {
+    uninstall()
+    vi.useFakeTimers()
+    getConnection.mockImplementation(async profile => ({ mode: profile === 'cloud-bot' ? 'remote' : 'local', profile }))
+    listSidebarSessions.mockResolvedValue({ recents: { sessions: [] } } as never)
+    hermesApi.mockResolvedValue(treePayload('p_any') as never)
+    $profiles.set([{ name: 'default' }, { name: 'cloud-bot' }] as never)
+    uninstall = installProfileSidebarCache()
+
+    await vi.advanceTimersByTimeAsync(15_000)
+    $gatewaySwapTarget.set('cloud-bot')
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(listSidebarSessions).not.toHaveBeenCalled()
+    expect(hermesApi).not.toHaveBeenCalled()
   })
 
   it('forgets every cached list when the connection changes', () => {
