@@ -1,18 +1,29 @@
 import { listSidebarSessions, type SessionInfo, type SidebarSessionsRequest } from '@/hermes'
 import { LOCAL_SESSION_SOURCE_IDS, MESSAGING_SESSION_SOURCE_IDS } from '@/lib/session-source'
-import { activeGatewayConnectionId } from '@/store/gateway'
+import { activeGatewayConnectionId, isActivePrimary } from '@/store/gateway'
 import { $sessionsLimit } from '@/store/layout'
-import { $activeGatewayProfile, $gatewaySwapTarget, $showAllProfiles, normalizeProfileKey } from '@/store/profile'
+import {
+  $activeGatewayProfile,
+  $gatewaySwapTarget,
+  $profiles,
+  $showAllProfiles,
+  normalizeProfileKey
+} from '@/store/profile'
 import { clearProjectTreeCache, paintCachedProjectTree, prefetchProjectTreeForProfile } from '@/store/projects'
-import { CRON_SECTION_LIMIT, MESSAGING_SECTION_LIMIT, setSessions } from '@/store/session'
+import { $connection, CRON_SECTION_LIMIT, MESSAGING_SECTION_LIMIT, setSessions } from '@/store/session'
 import { $removedSessionIds, tombstoneRowIds } from '@/store/session-removal'
 
 // Stale-while-revalidate for the sidebar across profile switches. The lists
 // used to be fetched only after the target profile's gateway landed, so every
 // switch showed an empty (or the previous profile's) sidebar for the whole
-// dial + fetch. Now each profile's last rows are kept, the target's rows are
-// prefetched over REST while its backend spawns, and both paint the moment the
+// dial + fetch. Now each profile's last rows are kept and paint the moment the
 // switch lands; the regular post-switch refresh then replaces them.
+//
+// A profile's FIRST switch can't be fixed at click time: the switch lands in
+// ~100 ms and then fires a burst of cold per-profile work at the same backend
+// (model.options, commands.catalog, …, ~3 s of CPU for a never-served
+// profile), and the sidebar's reads finish last behind it. So once the app is
+// idle the other profiles' lists are fetched one at a time ahead of any click.
 
 // The recents list is local-only: cron rows have their own section, kanban
 // dispatcher workers are read on the board, finite one-shot runs (`hermes -z`,
@@ -77,6 +88,11 @@ export function dropTombstoned(sessions: SessionInfo[]): SessionInfo[] {
 }
 
 const MAX_CACHED_PROFILES = 16
+// Startup is the busiest moment for the backend; warm after it, one profile at
+// a time, so the reads never compete with the foreground.
+const WARM_DELAY_MS = 8_000
+const WARM_GAP_MS = 750
+
 const cachedRows = new Map<string, SessionInfo[]>()
 
 const cacheKey = (connectionId: null | string, profile: string) =>
@@ -108,6 +124,7 @@ export function rememberProfileSessions(profile: string, rows: SessionInfo[]): v
 export function clearProfileSidebarCache(): void {
   cachedRows.clear()
   clearProjectTreeCache()
+  scheduleWarm()
 }
 
 // Add the newly active profile's cached rows. The sidebar filters $sessions by
@@ -134,17 +151,40 @@ function seedCachedProfileSessions(): void {
   })
 }
 
+// The prefetch reads `profile`'s databases through the backend already in
+// front, so it is only right when that backend sits on the same machine as the
+// profile: the active gateway is the window primary, the primary is local, and
+// the profile resolves locally (served by that primary or a local sibling, not
+// a per-profile remote override). The descriptor lookup is a cached IPC read
+// and never dials anything.
+async function readableThroughPrimary(profile: string): Promise<boolean> {
+  if (!isActivePrimary() || $connection.get()?.mode !== 'local') {
+    return false
+  }
+
+  try {
+    return (await window.hermesDesktop?.getConnection(profile))?.mode === 'local'
+  } catch {
+    return false
+  }
+}
+
 // Only cached, never painted: a page that lands after the switch could be
 // older than the refresh that already published, and re-adding its rows would
 // resurrect a session that refresh dropped.
 async function prefetchProfileSessions(profile: string): Promise<void> {
   const connectionId = activeGatewayConnectionId()
+  const key = cacheKey(connectionId, profile)
+
+  if (cachedRows.has(key)) {
+    return
+  }
 
   try {
     const result = await listSidebarSessions(sidebarSessionsRequest(profile))
     const rows = result.recents.sessions
 
-    if (rows && activeGatewayConnectionId() === connectionId) {
+    if (rows && activeGatewayConnectionId() === connectionId && !cachedRows.has(key)) {
       remember(connectionId, profile, rows)
     }
   } catch {
@@ -152,16 +192,68 @@ async function prefetchProfileSessions(profile: string): Promise<void> {
   }
 }
 
-function prefetchProfileSidebar(target: null | string): void {
-  // $gatewaySwapTarget names a legacy-door (local pool) switch. The REST reads
-  // ride the current connection, so from a registry source they would read
-  // another machine's profile of the same name.
-  if (!target || activeGatewayConnectionId() !== null) {
+async function prefetchProfileSidebar(profile: string): Promise<void> {
+  if (!(await readableThroughPrimary(profile))) {
     return
   }
 
-  void prefetchProfileSessions(target)
-  void prefetchProjectTreeForProfile(target)
+  await Promise.all([prefetchProfileSessions(profile), prefetchProjectTreeForProfile(profile)])
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// Bumped by every install and teardown: a loop from an older install (a
+// remount, a test) sees the change and exits instead of running beside the new one.
+let warmGeneration = 0
+let warmEnabled = false
+let warmingGeneration: null | number = null
+let warmAgain = false
+
+// Fill the cache for every profile not yet seen, serially. The list is read
+// live, and a change mid-run (profiles added, cache cleared by a connection
+// switch) queues one more pass instead of restarting the delay — the profile
+// list republishes often enough that a restart would never get to run.
+async function warmProfileSidebars(generation: number): Promise<void> {
+  const stale = () => generation !== warmGeneration
+
+  await sleep(WARM_DELAY_MS)
+
+  do {
+    warmAgain = false
+
+    for (const { name } of $profiles.get()) {
+      if (stale()) {
+        return
+      }
+
+      if ($showAllProfiles.get() || normalizeProfileKey(name) === normalizeProfileKey($activeGatewayProfile.get())) {
+        continue
+      }
+
+      await prefetchProfileSidebar(name)
+      await sleep(WARM_GAP_MS)
+    }
+  } while (warmAgain && !stale())
+}
+
+function scheduleWarm(): void {
+  if (!warmEnabled) {
+    return
+  }
+
+  if (warmingGeneration === warmGeneration) {
+    warmAgain = true
+
+    return
+  }
+
+  const generation = warmGeneration
+  warmingGeneration = generation
+  void warmProfileSidebars(generation).finally(() => {
+    if (warmingGeneration === generation) {
+      warmingGeneration = null
+    }
+  })
 }
 
 function paintCachedProfileSidebar(): void {
@@ -171,7 +263,13 @@ function paintCachedProfileSidebar(): void {
 
 /** Wire the cache to profile switches; returns the teardown. */
 export function installProfileSidebarCache(): () => void {
-  const offSwap = $gatewaySwapTarget.listen(prefetchProfileSidebar)
+  // A click on a profile the warm-up hasn't reached yet still gets a head start.
+  const offSwap = $gatewaySwapTarget.listen(target => {
+    if (target) {
+      void prefetchProfileSidebar(target)
+    }
+  })
+
   const offProfile = $activeGatewayProfile.listen(paintCachedProfileSidebar)
 
   // Leaving All profiles for the profile already behind the gateway moves no
@@ -182,7 +280,15 @@ export function installProfileSidebarCache(): () => void {
     }
   })
 
+  // Fires once now, and again whenever the profile list itself changes.
+  warmEnabled = true
+  warmGeneration += 1
+  const offProfiles = $profiles.subscribe(scheduleWarm)
+
   return () => {
+    warmEnabled = false
+    warmGeneration += 1
+    offProfiles()
     offSwap()
     offProfile()
     offShowAll()
