@@ -2,7 +2,7 @@ import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { $activeGatewayProfile, $gatewaySwapTarget, $profiles, setShowAllProfiles } from '@/store/profile'
-import { $connection, $sessions } from '@/store/session'
+import { $sessions } from '@/store/session'
 import type { SessionInfo } from '@/types/hermes'
 
 import {
@@ -35,7 +35,6 @@ vi.mock('@/hermes', () => ({
 }))
 
 const hermes = await import('@/hermes')
-const hermesApi = vi.mocked(hermes.hermesApi)
 const listSidebarSessions = vi.mocked(hermes.listSidebarSessions)
 const gw = await import('@/store/gateway')
 const activeGateway = vi.mocked(gw.activeGateway)
@@ -51,15 +50,21 @@ const treePayload = (id: string, activeId: null | string = null) => ({
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
-// Every profile resolves on this machine unless a test says otherwise.
-const getConnection = vi.fn(async (profile?: null | string) => ({ mode: 'local', profile }))
+// The primary gateway answers `projects.tree` for whichever profile the params name.
+const request = vi.fn(async (_method: string, params: { profile: string }) => treePayload(`p_${params.profile}`))
+
+// Every profile is served by the primary backend unless a test says otherwise.
+const sharedRoute = async (profile?: null | string) => ({ mode: 'local', profile, sharedPrimary: true })
+const getConnection = vi.fn(sharedRoute)
 
 let uninstall: () => void
 
 beforeEach(() => {
   vi.clearAllMocks()
+  getConnection.mockImplementation(sharedRoute)
+  request.mockImplementation(async (_method, params) => treePayload(`p_${params.profile}`))
+  activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
   Object.assign(window, { hermesDesktop: { ...window.hermesDesktop, getConnection } })
-  $connection.set({ mode: 'local' } as never)
   $profiles.set([])
   setShowAllProfiles(false)
   $activeGatewayProfile.set('default')
@@ -100,19 +105,18 @@ describe('profile sidebar cache', () => {
     expect(visibleIn('coder').map(session => session.id)).toEqual(['c1'])
   })
 
-  it("prefetches the target's lists while its backend spawns and paints them when the switch lands", async () => {
+  it("prefetches only the target's own lists and paints them when the switch lands", async () => {
     listSidebarSessions.mockResolvedValue({ recents: { sessions: [row('w1', 'writer')] } } as never)
-    hermesApi.mockResolvedValue(treePayload('p_writer') as never)
-    $activeProjectId.set('p_kept')
+    request.mockImplementation(async () => treePayload('p_writer', 'p_writer'))
 
     $gatewaySwapTarget.set('writer')
     await flush()
 
-    expect(listSidebarSessions).toHaveBeenCalledWith(sidebarSessionsRequest('writer'))
-    expect(hermesApi).toHaveBeenCalledWith(
-      expect.objectContaining({ path: expect.stringContaining('/api/profiles/projects/tree?') })
-    )
-    expect(String(hermesApi.mock.calls[0][0].path)).toContain('profile=writer')
+    // A native grant reads only the profile it is scoped to (403 profile_scope_mismatch).
+    expect(listSidebarSessions).toHaveBeenCalledWith(sidebarSessionsRequest('writer'), { scopeProfile: 'writer' })
+    // The profile's own tree, not the all-profiles REST aggregate.
+    expect(request).toHaveBeenCalledWith('projects.tree', { preview_limit: 3, profile: 'writer' })
+    expect(hermes.hermesApi).not.toHaveBeenCalled()
     expect(visibleIn('writer')).toEqual([])
 
     $gatewaySwapTarget.set(null)
@@ -120,26 +124,22 @@ describe('profile sidebar cache', () => {
 
     expect(visibleIn('writer').map(session => session.id)).toEqual(['w1'])
     expect($projectTree.get().map(project => project.id)).toEqual(['p_writer'])
-    // The REST tree has no active pointer; it must not clear the real one.
-    expect($activeProjectId.get()).toBe('p_kept')
+    expect($activeProjectId.get()).toBe('p_writer')
   })
 
-  it("keeps a profile's own tree over the REST prefetch and restores its active project", async () => {
-    const request = vi.fn(async () => treePayload('p_coder', 'p_coder'))
-    activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
+  it("reuses a profile's cached tree instead of fetching it again", async () => {
     $activeGatewayProfile.set('coder')
     await refreshProjectTree()
     $activeGatewayProfile.set('default')
     $projectTree.set([])
-    $activeProjectId.set(null)
+    request.mockClear()
 
     $gatewaySwapTarget.set('coder')
     await flush()
     $activeGatewayProfile.set('coder')
 
-    expect(hermesApi).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalledWith('projects.tree', expect.anything())
     expect($projectTree.get().map(project => project.id)).toEqual(['p_coder'])
-    expect($activeProjectId.get()).toBe('p_coder')
   })
 
   it("warms other profiles' lists once idle, so even a first switch paints immediately", async () => {
@@ -148,7 +148,6 @@ describe('profile sidebar cache', () => {
     listSidebarSessions.mockImplementation(
       async req => ({ recents: { sessions: [row(`${req.recentsProfile}-1`, req.recentsProfile)] } }) as never
     )
-    hermesApi.mockImplementation(async ({ path }) => treePayload(`p_${new URLSearchParams(path.split('?')[1]).get('profile')}`) as never)
     $profiles.set([{ name: 'default' }, { name: 'writer' }, { name: 'coder' }] as never)
     uninstall = installProfileSidebarCache()
 
@@ -164,13 +163,18 @@ describe('profile sidebar cache', () => {
     expect($projectTree.get().map(project => project.id)).toEqual(['p_coder'])
   })
 
-  it('never reads a profile with a remote override through the local backend', async () => {
+  it('never warms a profile with a backend of its own', async () => {
     uninstall()
     vi.useFakeTimers()
-    getConnection.mockImplementation(async profile => ({ mode: profile === 'cloud-bot' ? 'remote' : 'local', profile }))
+    // A remote override, or a local profile not served by the primary: scoping a read to
+    // either would dial (or spawn) that backend just to warm a cache.
+    getConnection.mockImplementation(async profile => ({
+      mode: profile === 'cloud-bot' ? 'remote' : 'local',
+      profile,
+      sharedPrimary: false
+    }))
     listSidebarSessions.mockResolvedValue({ recents: { sessions: [] } } as never)
-    hermesApi.mockResolvedValue(treePayload('p_any') as never)
-    $profiles.set([{ name: 'default' }, { name: 'cloud-bot' }] as never)
+    $profiles.set([{ name: 'default' }, { name: 'cloud-bot' }, { name: 'own-backend' }] as never)
     uninstall = installProfileSidebarCache()
 
     await vi.advanceTimersByTimeAsync(15_000)
@@ -178,7 +182,26 @@ describe('profile sidebar cache', () => {
     await vi.advanceTimersByTimeAsync(10)
 
     expect(listSidebarSessions).not.toHaveBeenCalled()
-    expect(hermesApi).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('tries a refused profile once, not on every profile-list republish', async () => {
+    uninstall()
+    vi.useFakeTimers()
+    listSidebarSessions.mockRejectedValue(new Error('403: profile_scope_mismatch'))
+    request.mockRejectedValue(new Error('gateway refused'))
+    $profiles.set([{ name: 'default' }, { name: 'writer' }] as never)
+    uninstall = installProfileSidebarCache()
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    for (let poll = 0; poll < 3; poll += 1) {
+      $profiles.set([{ name: 'default' }, { name: 'writer' }] as never)
+      await vi.advanceTimersByTimeAsync(30_000)
+    }
+
+    expect(listSidebarSessions).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledTimes(1)
   })
 
   it('forgets every cached list when the connection changes', () => {

@@ -309,7 +309,13 @@ export function scanSessionPullRequests(
   })
 }
 
-export async function listSidebarSessions(req: SidebarSessionsRequest): Promise<SidebarSessionsResponse> {
+/** `scopeProfile` reads another profile's page under that profile's own request
+ *  scope: a native grant answers `recents_profile` only for the profile it was
+ *  minted for (403 profile_scope_mismatch otherwise). */
+export async function listSidebarSessions(
+  req: SidebarSessionsRequest,
+  { scopeProfile }: { scopeProfile?: string } = {}
+): Promise<SidebarSessionsResponse> {
   if (sidebarBatchEndpointMissing) {
     return listSidebarSessionsLegacy(req)
   }
@@ -333,7 +339,7 @@ export async function listSidebarSessions(req: SidebarSessionsRequest): Promise<
 
   try {
     result = await hermesApi<SidebarSessionsResponse>({
-      ...profileScoped(),
+      ...(scopeProfile ? { profile: scopeProfile } : profileScoped()),
       path: `/api/profiles/sessions/sidebar?${params.toString()}`,
       timeoutMs: SESSION_LIST_REQUEST_TIMEOUT_MS
     })
