@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.agent_runtime_helpers import looks_like_degenerate_final
+from agent.agent_runtime_helpers_stall import looks_like_degenerate_final
 from agent.conversation_loop import _DEGENERATE_FINAL_NUDGE
 
 

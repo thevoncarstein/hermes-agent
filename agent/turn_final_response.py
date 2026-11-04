@@ -213,10 +213,9 @@ def finish_text_response(
     # heal threshold, deliver the queued notice through the status/warning callback — the normal out-of-band
     # delivery channel (gateway status message / CLI print). NEVER appended to messages/api_messages:
     # conversation context and the cached prompt prefix stay byte-identical.
-    from agent.agent_runtime_helpers import (
-        intent_ack_continuation_mode, looks_like_degenerate_final, promoted_reasoning_announces_action,
-        tool_results_this_turn, trailing_continue_intent,
-    )
+    from agent.agent_runtime_helpers import intent_ack_continuation_mode
+    from agent.agent_runtime_helpers_stall import looks_like_degenerate_final, promoted_reasoning_announces_action
+    from agent.agent_runtime_helpers_stall import tool_results_this_turn, trailing_continue_intent
 
     _ack_mode = intent_ack_continuation_mode(agent)
     # Said-continue-but-stopped guard: no tool calls but the short reply TAILS with an
@@ -226,19 +225,19 @@ def finish_text_response(
     # stalled model, and returning it as the answer aborts the tool loop while reporting
     # "complete" (#111761). Same cap, so a model that never acts still ends after 2 nudges.
     _stall_text = agent._strip_think_blocks(final_response or "")
+    _tool_rows = tool_results_this_turn(messages)
     _stall_continue_intent = (
         bool(getattr(agent, "_stall_guards", True))
         and agent.valid_tool_names
         and codex_ack_continuations < 2
         and (
-            trailing_continue_intent(_stall_text)
+            trailing_continue_intent(_stall_text, after_tool_work=_tool_rows > 0)
             or (bool(_promoted) and promoted_reasoning_announces_action(_stall_text))
         )
     )
     # Degenerate-final guard (#103483): the turn did real tool work and then stopped on a
     # fragment. Same scope knob and the SAME bounded counter as the ack continuation; the nudge
     # row itself closes the tool-work window, so a second fragment ends the turn as the answer.
-    _tool_rows = tool_results_this_turn(messages)
     _degenerate_final = (
         bool(getattr(agent, "_stall_guards", True))
         and _ack_mode != "off"

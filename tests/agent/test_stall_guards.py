@@ -15,7 +15,7 @@ Two guards, both notice/re-prompt-only:
 These assert behavior contracts, not message snapshots.
 """
 
-from agent.agent_runtime_helpers import trailing_continue_intent
+from agent.agent_runtime_helpers_stall import trailing_continue_intent
 from agent.tool_guardrails import (
     IDENTICAL_RESULT_STUB_MIN_CHARS,
     STALL_GUARD_IDENTICAL_CALL_THRESHOLD,
@@ -349,6 +349,35 @@ def test_detects_trailing_next_i():
     assert trailing_continue_intent("Step one complete. Next: I run the tests")
 
 
+def test_detects_trailing_now_let_me():
+    # Verbatim stalls from a creative-director session: the turn ended on the
+    # announcement with zero tool calls and nothing re-prompted it.
+    assert trailing_continue_intent("Now let me view the reference and inspect the FBX in parallel.")
+    assert trailing_continue_intent("Both files exist. Now, let me render the mesh")
+    assert not trailing_continue_intent("That's everything. Now let me know if you want changes.")
+
+
+def test_detects_trailing_let_me_sentence_only_after_tool_work():
+    stall = (
+        "Let me establish what the reference actually contains — by measuring its "
+        "pixels, not describing impressions."
+    )
+    assert trailing_continue_intent(stall, after_tool_work=True)
+    assert trailing_continue_intent("Copied it into scratch. Let me retry the render.", after_tool_work=True)
+    # Without tool work this turn a bare "Let me ..." tail stays an answer.
+    assert not trailing_continue_intent(stall)
+
+
+def test_after_tool_work_ignores_let_me_offers_and_delivered_content():
+    for text in (
+        "Pushed the branch. Let me know if you want a PR.",
+        "Let me summarize: the tests pass and the branch is pushed.",
+        "Let me be honest, the render looks right!",
+        ("Here is the full analysis. " * 30) + "Let me check the log.",
+    ):
+        assert not trailing_continue_intent(text, after_tool_work=True), text
+
+
 def test_ignores_intent_followed_by_more_content():
     # Intent phrase mid-message with substantive content after it — the model
     # already continued; nothing dangling.
@@ -431,7 +460,7 @@ def test_cycle_guard_stays_silent_for_progressing_and_poller_cycles():
 
 
 def test_promoted_reasoning_detector_catches_first_person_plan_tails():
-    from agent.agent_runtime_helpers import promoted_reasoning_announces_action
+    from agent.agent_runtime_helpers_stall import promoted_reasoning_announces_action
 
     # Verbatim tails from the #111761 thread — none match the narrow visible-content detector.
     for tail in (
@@ -448,7 +477,7 @@ def test_promoted_reasoning_detector_catches_first_person_plan_tails():
 
 
 def test_promoted_reasoning_detector_ignores_stated_answers():
-    from agent.agent_runtime_helpers import promoted_reasoning_announces_action
+    from agent.agent_runtime_helpers_stall import promoted_reasoning_announces_action
 
     for text in (
         "The answer is 42.",
@@ -462,7 +491,7 @@ def test_promoted_reasoning_detector_ignores_stated_answers():
 
 
 def test_promoted_reasoning_detector_catches_thai_plan_tails():
-    from agent.agent_runtime_helpers import promoted_reasoning_announces_action
+    from agent.agent_runtime_helpers_stall import promoted_reasoning_announces_action
 
     # Thai is unsegmented (no spaces between words), so the tail-boundary check falls back to
     # sentence punctuation, an em/en dash, or a run of ellipsis dots (#116495).
@@ -477,7 +506,7 @@ def test_promoted_reasoning_detector_catches_thai_plan_tails():
 
 
 def test_promoted_reasoning_detector_ignores_thai_stated_answers():
-    from agent.agent_runtime_helpers import promoted_reasoning_announces_action
+    from agent.agent_runtime_helpers_stall import promoted_reasoning_announces_action
 
     for text in (
         "คำตอบคือ 42 ครับ",  # "the answer is 42"
