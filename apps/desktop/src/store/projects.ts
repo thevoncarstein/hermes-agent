@@ -561,7 +561,6 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
 
     applyProjectTreePayload(res, context)
     rememberProjectTree(context.connectionId, profile, {
-      activeKnown: true,
       owner: { connectionId: context.connectionId, stampLocal: context.stampLocal },
       payload: res
     })
@@ -582,9 +581,6 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
 // the previous profile's tree up for a whole `projects.tree` round trip. Stale
 // by design: the refresh that follows every switch replaces it.
 interface CachedProjectTree {
-  // A REST prefetch has no active pointer (that lives with the profile's own
-  // backend), so painting it must leave $activeProjectId alone.
-  activeKnown: boolean
   owner: ProjectRowOwner
   payload: ProjectTreePayload
 }
@@ -627,36 +623,33 @@ export function paintCachedProjectTree(): void {
     )
   )
 
-  if (cached.activeKnown) {
-    $activeProjectId.set(cached.payload.active_id ?? null)
-  }
+  $activeProjectId.set(cached.payload.active_id ?? null)
 }
 
-// Fill the cache for a profile being switched TO, while its backend is still
-// spawning: the REST tree reads that profile's databases through the backend
-// already up, so the first paint doesn't wait out the spawn. An existing entry
-// wins — it came from the profile's own backend and carries discovered repos.
+// Fill the cache for a profile not shown yet, with the same `projects.tree`
+// read the post-switch refresh makes, sent on the active gateway with the
+// target's profile param. Callers only ask for a profile that gateway serves
+// (`sharedPrimary`). Not the REST tree: that route is the all-profiles
+// aggregate, which Electron fans out over every profile whatever `profile=`
+// says. An existing entry wins.
 export async function prefetchProjectTreeForProfile(profile: string): Promise<void> {
   const owner = projectRowOwner()
   const key = projectTreeCacheKey(owner.connectionId, profile)
+  const gateway = activeGateway()
 
-  if (projectTreeCache.has(key)) {
+  if (projectTreeCache.has(key) || gateway?.connectionState !== 'open') {
     return
   }
 
-  const params = new URLSearchParams({
-    preview_limit: String(projectTreePreviewLimit()),
-    profile: normalizeProfileKey(profile)
-  })
-
   try {
-    const payload = await hermesApi<ProjectTreePayload>({
-      path: `/api/profiles/projects/tree?${params.toString()}`,
-      timeoutMs: PROJECT_TREE_REQUEST_TIMEOUT_MS
-    })
+    const payload = await gatewayRequestOn<ProjectTreePayload>(
+      gateway,
+      'projects.tree',
+      projectParams({ preview_limit: projectTreePreviewLimit() }, normalizeProfileKey(profile))
+    )
 
-    if (!projectTreeCache.has(key) && activeGatewayConnectionId() === owner.connectionId) {
-      rememberProjectTree(owner.connectionId, profile, { activeKnown: false, owner, payload })
+    if (!projectTreeCache.has(key) && activeGateway() === gateway && activeGatewayConnectionId() === owner.connectionId) {
+      rememberProjectTree(owner.connectionId, profile, { owner, payload })
     }
   } catch {
     // Best-effort warm-up: the post-switch refresh still runs.

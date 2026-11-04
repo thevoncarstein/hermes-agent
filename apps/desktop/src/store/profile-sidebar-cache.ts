@@ -10,7 +10,7 @@ import {
   normalizeProfileKey
 } from '@/store/profile'
 import { clearProjectTreeCache, paintCachedProjectTree, prefetchProjectTreeForProfile } from '@/store/projects'
-import { $connection, CRON_SECTION_LIMIT, MESSAGING_SECTION_LIMIT, setSessions } from '@/store/session'
+import { CRON_SECTION_LIMIT, MESSAGING_SECTION_LIMIT, setSessions } from '@/store/session'
 import { $removedSessionIds, tombstoneRowIds } from '@/store/session-removal'
 
 // Stale-while-revalidate for the sidebar across profile switches. The lists
@@ -94,6 +94,10 @@ const WARM_DELAY_MS = 8_000
 const WARM_GAP_MS = 750
 
 const cachedRows = new Map<string, SessionInfo[]>()
+// One warm-up attempt per profile per connection: a profile the backend refuses
+// (or that has no shared route) must not be re-requested on every profile-list
+// republish. A connection switch clears it along with the cache.
+const warmAttempted = new Set<string>()
 
 const cacheKey = (connectionId: null | string, profile: string) =>
   `${connectionId ?? ''}\n${normalizeProfileKey(profile)}`
@@ -123,6 +127,7 @@ export function rememberProfileSessions(profile: string, rows: SessionInfo[]): v
 
 export function clearProfileSidebarCache(): void {
   cachedRows.clear()
+  warmAttempted.clear()
   clearProjectTreeCache()
   scheduleWarm()
 }
@@ -151,19 +156,20 @@ function seedCachedProfileSessions(): void {
   })
 }
 
-// The prefetch reads `profile`'s databases through the backend already in
-// front, so it is only right when that backend sits on the same machine as the
-// profile: the active gateway is the window primary, the primary is local, and
-// the profile resolves locally (served by that primary or a local sibling, not
-// a per-profile remote override). The descriptor lookup is a cached IPC read
-// and never dials anything.
-async function readableThroughPrimary(profile: string): Promise<boolean> {
-  if (!isActivePrimary() || $connection.get()?.mode !== 'local') {
+// Prefetches go out under the target profile's own request scope (a native
+// grant reads only the profile it names), so they are only free when that scope
+// lands on the backend already in front: the active gateway is the window
+// primary and the profile is served by it (`sharedPrimary`). Any other profile
+// has a backend of its own, and scoping a read to it would dial or spawn that
+// backend — or reach a per-profile remote override — just to warm a cache. The
+// descriptor lookup is a cached IPC read and never dials anything.
+async function servedByActivePrimary(profile: string): Promise<boolean> {
+  if (!isActivePrimary()) {
     return false
   }
 
   try {
-    return (await window.hermesDesktop?.getConnection(profile))?.mode === 'local'
+    return (await window.hermesDesktop?.getConnection(profile))?.sharedPrimary === true
   } catch {
     return false
   }
@@ -181,7 +187,10 @@ async function prefetchProfileSessions(profile: string): Promise<void> {
   }
 
   try {
-    const result = await listSidebarSessions(sidebarSessionsRequest(profile))
+    const result = await listSidebarSessions(sidebarSessionsRequest(profile), {
+      scopeProfile: normalizeProfileKey(profile)
+    })
+
     const rows = result.recents.sessions
 
     if (rows && activeGatewayConnectionId() === connectionId && !cachedRows.has(key)) {
@@ -193,7 +202,7 @@ async function prefetchProfileSessions(profile: string): Promise<void> {
 }
 
 async function prefetchProfileSidebar(profile: string): Promise<void> {
-  if (!(await readableThroughPrimary(profile))) {
+  if (!(await servedByActivePrimary(profile))) {
     return
   }
 
@@ -226,10 +235,17 @@ async function warmProfileSidebars(generation: number): Promise<void> {
         return
       }
 
-      if ($showAllProfiles.get() || normalizeProfileKey(name) === normalizeProfileKey($activeGatewayProfile.get())) {
+      const key = cacheKey(activeGatewayConnectionId(), name)
+
+      if (
+        $showAllProfiles.get() ||
+        warmAttempted.has(key) ||
+        normalizeProfileKey(name) === normalizeProfileKey($activeGatewayProfile.get())
+      ) {
         continue
       }
 
+      warmAttempted.add(key)
       await prefetchProfileSidebar(name)
       await sleep(WARM_GAP_MS)
     }
