@@ -33,15 +33,23 @@ _TOOL_LEVEL_DEFAULTS: dict[str, Any] = {
 
 
 class TerminalPolicyUnavailable(Exception):
-    """The routed profile's ``.env``/``config.yaml`` exists but cannot be read/parsed."""
+    """The routed profile's ``.env``/``config.yaml`` exists but cannot be read/parsed.
+
+    ``filename`` names the profile file that failed (``.env`` or ``config.yaml``), never its path, so a
+    client can be told which file to fix without learning where the profile lives."""
+
+    def __init__(self, message: str, *, filename: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.filename = filename
 
 
 class TerminalPolicyRefusal(dict[str, str]):
     """Marker scope (empty dict subclass) installed when policy resolution failed."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, filename: Optional[str] = None) -> None:
         super().__init__()
         self.reason = reason
+        self.filename = filename
 
 
 def set_terminal_scope(mapping: Optional[dict[str, str]]) -> Token:
@@ -69,7 +77,7 @@ def enforce_no_refusal() -> None:
     scope = _terminal_scope_var.get()
     if isinstance(scope, TerminalPolicyRefusal):
         raise TerminalPolicyUnavailable(
-            f"terminal policy unavailable for this profile: {scope.reason}")
+            f"terminal policy unavailable for this profile: {scope.reason}", filename=scope.filename)
 
 
 def terminal_env(name: str, default: str = "") -> str:
@@ -144,7 +152,7 @@ def build_profile_terminal_scope(
             env_path.read_bytes()
         except Exception as exc:
             if not isinstance(exc, PermissionError) or managed_scope.pinned_terminal_backend() is None:
-                raise TerminalPolicyUnavailable(f"cannot read {env_path}: {exc}") from exc
+                raise TerminalPolicyUnavailable(f"cannot read {env_path}: {exc}", filename=".env") from exc
         from agent.secret_scope import load_env_file
 
         profile_env = load_env_file(env_path)
@@ -168,7 +176,8 @@ def build_profile_terminal_scope(
     try:
         has_config = config_exists(config_path)
     except Exception as exc:
-        raise TerminalPolicyUnavailable(f"cannot resolve terminal config in {home}: {exc}") from exc
+        raise TerminalPolicyUnavailable(
+            f"cannot resolve terminal config in {home}: {exc}", filename="config.yaml") from exc
     raw_terminal = None
     if has_config:
         from hermes_cli.config_backend import read_config_doc_readonly
@@ -177,7 +186,7 @@ def build_profile_terminal_scope(
             # Signature-cached: a scope is rebuilt per routed turn/poll, the file rarely changes.
             raw = read_config_doc_readonly(config_path)
         except Exception as exc:
-            raise TerminalPolicyUnavailable(f"cannot parse {config_path}: {exc}") from exc
+            raise TerminalPolicyUnavailable(f"cannot parse {config_path}: {exc}", filename="config.yaml") from exc
         raw_terminal = raw.get("terminal") if isinstance(raw, dict) else None
         if isinstance(raw_terminal, dict):
             _apply_terminal_mapping(scope, raw_terminal)
@@ -226,7 +235,7 @@ def prepare_profile_terminal_scope(
         return build_profile_terminal_scope(hermes_home, env_overlay=env_overlay)
     except TerminalPolicyUnavailable as exc:
         logger.warning("terminal policy unavailable: %s", exc)
-        return TerminalPolicyRefusal(str(exc))
+        return TerminalPolicyRefusal(str(exc), exc.filename)
 
 
 def install_profile_terminal_scope(

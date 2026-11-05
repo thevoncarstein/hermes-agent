@@ -13,6 +13,7 @@ from gateway.session_contract import CANONICAL_GATEWAY_PROTOCOL, SessionActor, S
 from gateway.session_llm_oneshot import DeferredReply
 from hermes_constants import profile_name_for_home
 from hermes_state_runtime import RuntimeStoreError
+from tools.terminal_scope import TerminalPolicyUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,22 @@ def _log_storage_failure(profile, method, session_id, exc: sqlite3.Error) -> Non
         shown = f'{shown[:48]}… ({len(shown)} chars)'
     logger.warning('%s storage failure for profile=%s session_id=%s: %s',
                    method, _profile_label(profile), shown, exc, exc_info=first)
+
+
+def _profile_config_refusal(rid, profile, method, exc: TerminalPolicyUnavailable) -> dict:
+    """The owning profile's ``.env``/``config.yaml`` cannot be read, so its terminal policy fails closed
+    (tools/terminal_scope.py). Name the file to fix instead of escaping to the transport's -32603
+    ``internal error``: a sync merge that leaves conflict markers in config.yaml must not read as a
+    crash. The message stays short (the desktop toast shows it verbatim under 180 characters) and
+    carries no path; the parser's diagnosis, with its line, goes to the log."""
+    filename = exc.filename or 'config.yaml'
+    label = _profile_label(profile)
+    logger.warning('%s refused for profile=%s: profile_config_unavailable file=%s: %s',
+                   method, label, filename, exc)
+    return {'jsonrpc': '2.0', 'id': rid, 'error': {
+        'code': 5014,
+        'message': f"Profile {label}'s {filename} cannot be read. Fix it, then try again; errors.log names the line.",
+        'data': {'reason': 'profile_config_unavailable', 'file': filename}}}
 
 
 # ``session.detach end_reason``: a short snake_case label, stored verbatim as ``sessions.end_reason``.
@@ -375,6 +392,8 @@ class AuthorityConnection:
                                  params.get('session_id'), exc)
             return {'jsonrpc': '2.0', 'id': rid, 'error': {
                 'code': 5001, 'message': 'storage_unavailable', 'data': {'reason': 'storage_unavailable'}}}
+        except TerminalPolicyUnavailable as exc:
+            return _profile_config_refusal(rid, getattr(self.actor, 'profile_id', None), method, exc)
 
     async def a2a_forward(self, ref, params):
         from gateway.session_a2a import forward
