@@ -139,3 +139,17 @@ class TestPluginDispatch:
             image_generation_tool, "_read_configured_image_provider", lambda: None
         )
         assert image_generation_tool.check_image_generation_requirements() is False
+
+    def test_requirements_probe_never_installs_fal_extra(self, monkeypatch):
+        """The availability probe runs on gateway threads; a venv sync there wedged session.create."""
+        import pm.extras
+        from tools import image_generation_tool
+
+        def _no_install(extra):
+            raise AssertionError(f"check_fn installed extra {extra!r}")
+
+        monkeypatch.setattr(pm.extras, "ensure_import", _no_install)
+        monkeypatch.setattr(pm.extras, "extra_supported", lambda extra: True)
+        monkeypatch.setattr(image_generation_tool, "fal_client", None)
+        monkeypatch.setattr(image_generation_tool, "check_fal_api_key", lambda: True)
+        assert image_generation_tool.check_image_generation_requirements() is True

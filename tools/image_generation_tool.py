@@ -581,15 +581,21 @@ def _get_plugin_provider(name: str, *, force: bool = False):
     return get_provider(name)
 
 
+def _fal_extra_installable() -> bool:
+    try:
+        from pm.extras import extra_supported
+    except ImportError:  # pm unavailable: only an already-present SDK counts
+        import importlib.util
+        return importlib.util.find_spec("fal_client") is not None
+    return extra_supported("fal")
+
+
 def check_image_generation_requirements() -> bool:
     """True if FAL or the explicitly configured image backend is available."""
-    try:
-        if check_fal_api_key():
-            # Lazy import doubles as the SDK presence check: ImportError falls through to plugins.
-            _load_fal_client()
-            return True
-    except ImportError:
-        pass
+    # Probe, never install: this runs while building tool definitions on gateway threads, where
+    # ensure_import's venv sync blocked session.create. The SDK installs lazily on first call.
+    if check_fal_api_key() and (fal_client is not None or _fal_extra_installable()):
+        return True
     configured = _plugin_provider_name()
     if configured is None:
         return False
